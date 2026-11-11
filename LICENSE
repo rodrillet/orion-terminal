@@ -1,0 +1,73 @@
+ORION TERMINAL — LICENÇA DE USO (CÓDIGO-FONTE VISÍVEL, TODOS OS DIREITOS RESERVADOS)
+
+Copyright © 2026 Orya Growth. Todos os direitos reservados.
+
+O Orion Terminal — código-fonte, aplicativo compilado, interface, ícone, nome, imagens e
+documentação (o "Software") — é obra protegida pela Lei nº 9.609/1998 (Lei do Software) e pela
+Lei nº 9.610/1998 (Lei de Direitos Autorais), e pertence exclusivamente à Orya Growth (a
+"Titular"). O código-fonte está publicado para consulta e transparência. Publicar o código não
+transfere nem licencia nenhum direito além dos descritos abaixo.
+
+1. O QUE VOCÊ PODE FAZER
+   a) Baixar e instalar o aplicativo a partir dos releases oficiais
+      (https://github.com/rodrillet/orion-terminal/releases) ou do instalador oficial.
+   b) Usar o aplicativo, de graça, em quantos computadores quiser, para fins pessoais ou
+      profissionais, inclusive no seu trabalho.
+   c) Ler o código-fonte no repositório oficial, para avaliar o Software e entender como ele
+      funciona.
+   d) Compilar o código-fonte, sem modificações, para uso próprio no seu computador, sem
+      distribuir o resultado.
+   e) Abrir issues e sugerir melhorias no repositório oficial.
+
+2. O QUE VOCÊ NÃO PODE FAZER sem autorização prévia e por escrito da Titular
+   a) Copiar ou reproduzir o código-fonte, no todo ou em parte, fora do uso permitido no item 1.
+   b) Modificar o Software, criar obras derivadas ou incorporar qualquer parte dele em outro
+      software, produto ou serviço.
+   c) Distribuir, publicar, sublicenciar, vender, alugar ou disponibilizar o Software, o código ou
+      versões compiladas por você, por qualquer meio, com ou sem alterações, de graça ou não.
+   d) Usar o nome "Orion Terminal", "Orion", "Orya Growth", o ícone, o logotipo ou a identidade
+      visual do Software, inclusive em produtos parecidos ou que possam confundir quem usa.
+   e) Remover ou alterar avisos de autoria, de direitos ou desta licença.
+   f) Usar o código-fonte ou a documentação para treinar ou ajustar modelos de inteligência
+      artificial, ou para gerar um software concorrente.
+
+   A cópia temporária feita pelo próprio GitHub ao "dar fork" é permitida pelos Termos de Serviço
+   do GitHub apenas para visualização dentro da plataforma; ela não autoriza nenhum dos usos
+   proibidos acima.
+
+3. CONTRIBUIÇÕES
+   Pull requests só são aceitos com acordo prévio. Ao enviar qualquer contribuição (código,
+   texto, imagem ou ideia) ao repositório oficial, você cede à Titular, de forma gratuita,
+   perpétua, irrevogável e mundial, os direitos patrimoniais sobre ela, e declara que tem o direito
+   de fazer essa cessão.
+
+4. COMPONENTES DE TERCEIROS
+   O Software usa bibliotecas de terceiros, cada uma sob a sua própria licença (MIT e Apache 2.0),
+   listadas em THIRD_PARTY_NOTICES.md. Esta licença não altera as licenças desses componentes;
+   ela vale para todo o restante do Software.
+
+5. ENCERRAMENTO
+   A permissão do item 1 termina automaticamente se você descumprir esta licença. A Titular pode
+   tomar as medidas cabíveis, civis e criminais, contra violações (Lei nº 9.609/1998, art. 12;
+   Lei nº 9.610/1998).
+
+6. SEM GARANTIA
+   O Software é fornecido "como está", sem garantia de qualquer tipo. A Titular não responde por
+   danos decorrentes do uso ou da impossibilidade de uso do Software, na extensão permitida pela
+   lei.
+
+7. LEI E FORO
+   Esta licença é regida pelas leis da República Federativa do Brasil. Fica eleito o foro da
+   comarca de Goiânia/GO para resolver qualquer questão relacionada a ela.
+
+Pedidos de autorização: https://oryagrowth.com
+
+---------------------------------------------------------------------------------------------
+ENGLISH SUMMARY (the Portuguese text above prevails)
+
+Copyright © 2026 Orya Growth. All rights reserved. The source code is published for reference
+only. You may download the official releases and use the app for free, for personal or
+professional purposes, read the source code and build it unmodified for your own use. You may NOT copy, modify, create derivative
+works, redistribute, sell, sublicense, use the "Orion Terminal" name or logo, or use the code to
+train AI models, without prior written permission. Third-party components keep their own licenses
+(see THIRD_PARTY_NOTICES.md). Provided "as is", without warranty. Governed by Brazilian law.

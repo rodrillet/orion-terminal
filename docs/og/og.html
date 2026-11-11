@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Orion Terminal — imagem de capa</title>
+<!-- Imagem de capa (1280×640) no padrão das OG da Orya: marfim pontilhado, título em duas
+     cores, pílulas, onda azul e a janela do app à direita. A janela é um print real do app. Renderizar: ver docs/og/README.md -->
+<style>
+@font-face { font-family: "Instrument Sans"; src: url("instrument-sans-latin.woff2") format("woff2"); font-weight: 400 700; }
+:root {
+  --bg: #f7f7f4; --branco: #fff; --tinta: #0c1620; --tinta-2: #4a555f; --cinza: #8b949c; --linha: #e2e3de;
+  --azul: #1f6fe5; --azul-forte: #195bbd; --azul-claro: #6aa8ff; --azul-suave: #e8f0fd;
+  --sans: "Instrument Sans", -apple-system, sans-serif;
+  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1280px; height: 640px; overflow: hidden; }
+body { background: var(--bg); font-family: var(--sans); color: var(--tinta); -webkit-font-smoothing: antialiased; position: relative; }
+.pontos { position: absolute; inset: 0; background-image: radial-gradient(#d9dad4 1.1px, transparent 1.2px); background-size: 22px 22px;
+  mask-image: linear-gradient(100deg, #000 0%, #000 45%, transparent 75%); }
+.onda { position: absolute; right: -180px; bottom: -330px; width: 1250px; height: 560px; border-radius: 50%;
+  background: radial-gradient(ellipse at 40% 35%, #8fbcff 0%, #4a8df0 38%, var(--azul) 60%, var(--azul-forte) 100%);
+  filter: blur(.4px); }
+.onda::before { content: ""; position: absolute; inset: -40px -20px auto -60px; height: 120px; border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,.75), rgba(255,255,255,0)); filter: blur(24px); }
+
+/* Lado esquerdo */
+.esq { position: absolute; left: 72px; top: 58px; width: 560px; }
+.marca { display: flex; align-items: center; gap: 12px; }
+.marca img { width: 50px; height: 50px; filter: drop-shadow(0 6px 10px rgba(12,22,32,.18)); }
+.marca b { font-size: 22px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+.marca small { display: block; font-size: 13px; font-weight: 500; color: var(--cinza); margin-top: 3px; letter-spacing: 0; }
+.pilula { display: inline-flex; align-items: center; gap: 9px; margin-top: 40px; height: 40px; padding: 0 18px 0 8px;
+  background: var(--branco); border-radius: 999px; box-shadow: 0 1px 2px rgba(12,22,32,.06), inset 0 0 0 1px var(--linha);
+  font-size: 16px; font-weight: 600; color: var(--tinta-2); }
+.pilula i { width: 26px; height: 26px; border-radius: 999px; background: var(--azul-suave); display: grid; place-items: center; }
+.pilula i::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--azul); box-shadow: 0 0 0 4px rgba(31,111,229,.18); }
+h1 { margin-top: 26px; font-size: 64px; line-height: .98; font-weight: 600; letter-spacing: -.055em; }
+h1 span { display: block; color: var(--cinza); }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 34px; }
+.chip { height: 44px; padding: 0 18px; display: inline-flex; align-items: center; gap: 9px; background: var(--branco); border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(12,22,32,.06), inset 0 0 0 1px var(--linha); font-size: 17px; font-weight: 600; }
+.chip .p { width: 9px; height: 9px; border-radius: 50%; }
+.url { position: absolute; left: 72px; bottom: 50px; font-size: 19px; font-weight: 600; color: var(--tinta-2); letter-spacing: -.01em; }
+
+/* Print real do app (docs/og/interface.png, capturado numa cópia de demonstração) */
+.tela { position: absolute; left: 650px; top: 66px; width: 960px; border-radius: 16px;
+  box-shadow: 0 40px 80px -24px rgba(12,22,32,.5), 0 0 0 1px rgba(12,22,32,.14); }
+/* Janela do app */
+.janela { position: absolute; left: 676px; top: 70px; width: 700px; height: 470px; border-radius: 18px; overflow: hidden;
+  background: #0d0f14; box-shadow: 0 40px 80px -24px rgba(12,22,32,.45), 0 0 0 1px rgba(12,22,32,.12); color: #e8e8ee; }
+.topo { height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid rgba(255,255,255,.06); background: #12151b; }
+.sem { display: flex; gap: 7px; margin-right: 6px; } .sem i { width: 12px; height: 12px; border-radius: 50%; }
+.ws { height: 28px; padding: 0 11px 0 6px; display: flex; align-items: center; gap: 7px; border-radius: 9px; background: rgba(255,255,255,.06); font-size: 13px; font-weight: 600; }
+.ws i { width: 18px; height: 18px; border-radius: 6px; background: linear-gradient(135deg, #6aa8ff, #1f6fe5); }
+.uso { margin-left: auto; display: flex; gap: 8px; }
+.anel { height: 28px; padding: 0 10px 0 5px; border-radius: 9px; background: rgba(255,255,255,.06); display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; font-family: var(--mono); }
+.anel svg { width: 20px; height: 20px; transform: rotate(-90deg); }
+.corpo { display: flex; height: calc(100% - 46px); }
+.lat { width: 228px; padding: 14px 10px; border-right: 1px solid rgba(255,255,255,.05); background: #0f1217; }
+.lat h4 { font-size: 10.5px; letter-spacing: .08em; color: #7d8590; font-weight: 700; margin: 2px 6px 10px; }
+.ag { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 11px; margin-bottom: 4px; }
+.ag.ativo { background: rgba(255,255,255,.07); box-shadow: inset 0 0 0 1px rgba(255,255,255,.07); }
+.ag.filho { margin-left: 18px; }
+.av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff; position: relative; flex: none; }
+.av::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid var(--anel, transparent); }
+.ag b { display: block; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 150px; }
+.ag small { display: block; font-size: 11px; color: #8b949c; margin-top: 1px; }
+.ag small em { font-style: normal; }
+.painel { flex: 1; display: flex; flex-direction: column; padding: 12px; gap: 10px; background: #0b0d11; }
+.cartao { flex: 1; border-radius: 13px; background: #11141a; box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 10px 24px -12px rgba(0,0,0,.6); display: flex; flex-direction: column; overflow: hidden; }
+.cab { padding: 10px 14px 8px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.cab b { font-size: 13px; } .cab b span { color: #6aa8ff; margin-right: 6px; }
+.cab small { display: flex; gap: 10px; font-size: 11px; color: #8b949c; margin-top: 3px; font-family: var(--mono); }
+.cab small .ok { color: #8fdc6e; } .cab small .porta { color: #6aa8ff; }
+.term { flex: 1; padding: 12px 14px; font-family: var(--mono); font-size: 12.2px; line-height: 1.62; color: #c9ced6; }
+.term .pr { color: #6aa8ff; } .term .v { color: #8fdc6e; } .term .c { color: #7d8590; } .term .a { color: #f5d76e; }
+.compose { margin: 0 12px 12px; height: 40px; border-radius: 11px; background: rgba(255,255,255,.05); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+  display: flex; align-items: center; gap: 8px; padding: 0 8px; font-size: 12.5px; color: #9aa3ad; }
+.tag { height: 24px; padding: 0 8px; display: inline-flex; align-items: center; gap: 5px; border-radius: 7px; background: rgba(106,168,255,.16); color: #a9cbff; font-weight: 600; font-family: var(--mono); font-size: 11.5px; }
+.env { margin-left: auto; width: 26px; height: 26px; border-radius: 50%; background: var(--azul); display: grid; place-items: center; }
+.env::before { content: ""; width: 7px; height: 7px; border-left: 2px solid #fff; border-top: 2px solid #fff; transform: translateY(2px) rotate(45deg); }
+</style>
+</head>
+<body>
+<div class="pontos"></div>
+<div class="onda"></div>
+
+<div class="esq">
+  <div class="marca"><img src="icone.png" alt=""><div><b>Orion Terminal</b><small>Para macOS · Apple Silicon</small></div></div>
+  <div class="pilula"><i></i>Terminal nativo para agentes de IA</div>
+  <h1>Orquestre agentes<span>num terminal feito para o Mac.</span></h1>
+  <div class="chips">
+    <div class="chip"><i class="p" style="background:#d97757"></i>Claude Code</div>
+    <div class="chip"><i class="p" style="background:#10a37f"></i>Codex</div>
+    <div class="chip"><i class="p" style="background:#4f8df5"></i>Gemini</div>
+    <div class="chip"><i class="p" style="background:#0c1620"></i>Multicontas</div>
+  </div>
+</div>
+<div class="url">github.com/rodrillet/orion-terminal</div>
+
+<img class="tela" src="interface.png" alt="">
+</body>
+</html>
