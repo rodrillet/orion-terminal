@@ -21,6 +21,8 @@ final class Loja {
   var paletaAberta = false
   var telaCheia = false
   var filtro = ""
+  /// O que a barra lateral mostra: "agentes" ou "historico".
+  var modoLateral = "agentes" { didSet { if modoLateral != oldValue { filtro = "" } } }
   /// Largura da barra lateral enquanto a alça é arrastada (só vai para os ajustes ao soltar).
   var larguraArrasto: Double?
   /// Diálogo do app aberto (confirmar, renomear, novo workspace…). Veja Dialogos.swift.
@@ -42,6 +44,8 @@ final class Loja {
   /// Muda quando alguém pede a lista de portas (atalho, CLI): o indicador da barra abre o popover.
   var pedirPortas = 0
   var pedirFechados = 0
+  /// Muda quando alguém pede a lista de workspaces (CLI): o seletor do topo abre.
+  var pedirWorkspaces = 0
   /// Muda para mandar fechar os popovers abertos (portas, memória, fechados, notificações).
   var fecharPopovers = 0
 

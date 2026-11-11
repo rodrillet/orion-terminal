@@ -36,6 +36,8 @@ final class Painel: TerminalViewDelegate {
   /// Estado para quem orquestra (quadro de agentes, barra lateral) e desde quando está nele.
   var estado = EstadoPainel.dormindo
   var desde = Date()
+  /// Última linha útil que o agente escreveu (prévia na barra lateral). Lida só quando ele para.
+  var previa = ""
   /// Marca do quadro feita à mão ("revisar" | "concluido"); some quando o agente volta a trabalhar.
   var marca: String?
   /// Memória do shell deste painel e de tudo o que ele abriu (bytes), e quantos processos são.
@@ -118,13 +120,25 @@ final class Painel: TerminalViewDelegate {
     if estadoFixo != nil { return }
     let novo = calcularEstado()
     if novo != estado {
+      let antes = estado
       estado = novo; desde = Date()
+      if antes == .trabalhando, novo == .esperando || novo == .pronto {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.lerPrevia() }
+      }
       // Voltou a trabalhar: a marca "revisar"/"concluído" já não vale.
       if novo == .trabalhando, marca != nil { marca = nil; no.marca = nil; loja.salvarDepois() }
     }
     // Um terminal que virou agente (alguém digitou `claude`) ganha o seu personagem.
     if persona == nil, tipoAgente != nil { persona = loja.novaPersona() }
     atualizarCompose()
+  }
+
+  func lerPrevia() {
+    guard let texto = baloes().last(where: { !$0.meu })?.texto else { return }
+    let linha = texto.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+      .last { $0.count > 3 && !$0.allSatisfy { "─━═-_>❯⏵·•*│ ".contains($0) } } ?? ""
+    let curta = String(linha.prefix(160))
+    if curta != previa { previa = curta }
   }
 
   /// O compose aparece nos agentes (ajuste "agentes"), em todos ("sempre") ou só quando chamado

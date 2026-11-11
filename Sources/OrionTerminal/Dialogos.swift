@@ -342,12 +342,14 @@ struct CartaoDialogo: View {
        }
       }
       Rotulo("Avatar")
-      LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 12), spacing: 4) {
-        ForEach(Persona.avatares, id: \.self) { a in
-          Text(a).font(.system(size: 17)).frame(maxWidth: .infinity).frame(height: 30)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(d.avatar == a ? Color(hex: d.cor).opacity(0.3) : Cor.vidro))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(d.avatar == a ? Color(hex: d.cor) : .clear))
-            .contentShape(Rectangle()).onTapGesture { d.avatar = a }.help("Usar este avatar")
+      let atual = Mascote.forma(Persona(nome: d.nomePersona, avatar: d.avatar, cor: d.cor))
+      LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 8), spacing: 6) {
+        ForEach(Mascote.formas, id: \.self) { a in
+          DesenhoMascote(forma: a, cor: d.cor, tamanho: 34, humor: atual == a ? .atento : .normal)
+            .frame(maxWidth: .infinity).frame(height: 48)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(atual == a ? Color(hex: d.cor).opacity(0.18) : Cor.vidro))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(atual == a ? Color(hex: d.cor).opacity(0.8) : .clear))
+            .contentShape(Rectangle()).onTapGesture { d.avatar = a }.help(Mascote.nomes[a] ?? a)
         }
       }
       Rotulo("Cor")
@@ -422,12 +424,10 @@ struct CartaoDialogo: View {
       CampoDialogo(texto: $d.mensagem, dica: "Ex.: revisar a landing do cliente e listar o que falta", linhas: 3).focused($foco)
       Rotulo("Personagem")
       HStack(spacing: 8) {
-        Menu {
-          ForEach(Persona.avatares, id: \.self) { a in Button(a) { d.avatar = a } }
-        } label: {
-          AvatarPersona(persona: Persona(nome: d.nomePersona, avatar: d.avatar, cor: d.cor), tamanho: 34, ferramenta: d.kind)
-        }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("Trocar o avatar")
+        AvatarPersona(persona: Persona(nome: d.nomePersona, avatar: d.avatar, cor: d.cor), tamanho: 34, ferramenta: d.kind)
+          .contentShape(Rectangle())
+          .onTapGesture { d.avatar = Mascote.proxima(Mascote.forma(Persona(nome: d.nomePersona, avatar: d.avatar, cor: d.cor))) }
+          .help("Clique para trocar a forma")
         CampoDialogo(texto: $d.nomePersona, dica: "Nome")
         CampoDialogo(texto: $d.papel, dica: "Papel (Dev, Revisor…)")
       }

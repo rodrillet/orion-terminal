@@ -167,20 +167,21 @@ struct AvatarPersona: View {
   var maestro = false
 
   var body: some View {
-    let cor = Color(hex: persona.cor)
-    ZStack {
-      Circle().fill(LinearGradient(colors: [cor.opacity(Cor.claro ? 0.38 : 0.42), cor.opacity(Cor.claro ? 0.20 : 0.16)], startPoint: .top, endPoint: .bottom))
-      Text(persona.avatar).font(.system(size: tamanho * 0.56))
-    }
-    .frame(width: tamanho, height: tamanho)
-    .overlay(Circle().strokeBorder(anel ?? cor.opacity(0.55), lineWidth: anel != nil ? max(1.5, tamanho * 0.07) : 1))
+    DesenhoMascote(forma: Mascote.forma(persona), cor: persona.cor, tamanho: tamanho, humor: estado?.humor ?? .normal)
+    // Estado: um ponto no canto (como num chat); sem estado, a ferramenta.
     .overlay(alignment: .bottomTrailing) {
-      if let ferramenta { IconePrograma(processo: ferramenta, tamanho: max(12, tamanho * 0.42)).offset(x: tamanho * 0.12, y: tamanho * 0.12) }
+      if let anel {
+        Circle().fill(anel).frame(width: max(7, tamanho * 0.28), height: max(7, tamanho * 0.28))
+          .overlay(Circle().strokeBorder(Fundo.cor, lineWidth: max(1.5, tamanho * 0.06)))
+          .offset(x: tamanho * 0.06, y: tamanho * 0.04)
+      } else if let ferramenta {
+        IconePrograma(processo: ferramenta, tamanho: max(11, tamanho * 0.38)).offset(x: tamanho * 0.1, y: tamanho * 0.08)
+      }
     }
     .overlay(alignment: .topLeading) {
       if maestro {
-        Image(systemName: "wand.and.stars").font(.system(size: max(7, tamanho * 0.26), weight: .bold)).foregroundStyle(Cor.claro ? .white : .black)
-          .padding(tamanho * 0.07).background(Circle().fill(Cor.ambar)).offset(x: -tamanho * 0.12, y: -tamanho * 0.12)
+        Image(systemName: "crown.fill").font(.system(size: max(6, tamanho * 0.22), weight: .bold)).foregroundStyle(Color(white: 0.12))
+          .padding(tamanho * 0.06).background(Circle().fill(Cor.ambar)).offset(x: -tamanho * 0.1, y: -tamanho * 0.1)
       }
     }
   }

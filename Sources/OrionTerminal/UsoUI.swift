@@ -103,8 +103,7 @@ struct ChipFerramenta: View {
       }
     }
     .padding(.leading, 4).padding(.trailing, !compacto && (pct != nil || contas.count > 1) ? 9 : 4).frame(height: 34)
-    .background(RoundedRectangle(cornerRadius: R.controle + 2, style: .continuous).fill(aberto || sobre ? Cor.vidro2 : Cor.vidro))
-    .overlay(RoundedRectangle(cornerRadius: R.controle + 2, style: .continuous).strokeBorder(aberto ? Cor.acento.opacity(0.5) : Cor.linha))
+    .background(RoundedRectangle(cornerRadius: R.controle + 2, style: .continuous).fill(aberto ? Cor.vidro2 : (sobre ? Cor.vidro : .clear)))
     .contentShape(Rectangle())
     .onHover { sobre = $0 }
     .modifier(AncoraUso(loja: loja, tipo: tipo, nome: "topo-\(tipo)", clique: true))

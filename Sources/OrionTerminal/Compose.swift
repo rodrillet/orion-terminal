@@ -149,7 +149,7 @@ final class Rascunho {
         trocar("")
       } else {
         // Etiqueta dentro do texto: ao enviar, o contexto deste terminal vai junto.
-        c.inserirEtiqueta(rotulo: apelido, marca: alvo.persona?.avatar ?? "⌁", texto: "@\(apelido)", painel: alvo.id, em: faixa)
+        c.inserirEtiqueta(rotulo: apelido, marca: alvo.persona != nil ? "@" : "⌁", texto: "@\(apelido)", painel: alvo.id, em: faixa)
       }
       fecharMencao(painel)
     case .pasta, .arquivo:

@@ -26,7 +26,8 @@ Agentes (Claude Code / Codex / Gemini CLI) — cada um é um personagem
   orion esperar ID [--tempo S]                 espera o agente parar / o comando terminar
   orion interromper ID · orion reiniciar ID
   orion marcar [ID] revisar|concluido|nada     coluna do quadro
-  orion personagem [ID] [--nome N] [--papel P] [--avatar 🦊] [--maestro]
+  orion personagem [ID] [--nome N] [--papel P] [--avatar FORMA] [--maestro]
+                                               FORMA: gota bolha nuvem pilula hexa flor fantasma losango
   orion fechados · orion reabrir [N|ID] [--fundo]
                                                agentes fechados há pouco voltam na mesma conversa
   orion conta ID CONTA · orion conta --padrao CONTA · orion contas · orion uso [--atualizar]
@@ -58,6 +59,7 @@ Terminais
 Interface
   orion versao | atualizar                     versão instalada / instala a mais nova do GitHub
   orion ui quadro | paleta | ajustes [seção] | contas | temas | lateral | barra | fechar
+  orion ui workspaces | historico | agentes     seletor de workspace / o que a barra lateral mostra
   orion ui claude | codex | gemini             painel da ferramenta (contas, uso, agentes, novo)
   orion ui conversa [ID] | portas | subagente [ID] | personagem [ID]
   orion ui uso [claude|codex]                  o resumo (o mesmo do hover)

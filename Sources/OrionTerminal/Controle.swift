@@ -251,7 +251,10 @@ final class Controle {
       var ps = x.persona ?? loja.novaPersona()
       if let n = p["nome"] as? String, !n.isEmpty { ps.nome = n }
       if let r = p["papel"] as? String { ps.papel = r }
-      if let a = p["avatar"] as? String, !a.isEmpty { ps.avatar = a }
+      if let a = (p["avatar"] as? String)?.lowercased(), !a.isEmpty {
+        guard Mascote.formas.contains(a) else { return erro("avatar desconhecido: use \(Mascote.formas.joined(separator: ", "))") }
+        ps.avatar = a
+      }
       if let c = p["cor"] as? String, Tema.hexValido(c) != nil { ps.cor = c }
       x.persona = ps
       if p["maestro"] as? Bool == true { x.maestro = true }
@@ -692,6 +695,8 @@ final class Controle {
         x.conversa.toggle()
       case "portas": loja.atualizarPortas(); loja.pedirPortas += 1
       case "fechados": loja.pedirFechados += 1
+      case "workspaces": loja.pedirWorkspaces += 1
+      case "historico", "agentes": loja.ajustes.barraLateral = true; loja.abrirQuadro(false); loja.modoLateral = (p["alvo"] as? String) ?? "agentes"
       case "novo-workspace": loja.novoWorkspacePerguntando()
       case "temas": d?.abrirAjustes(aba: "aparencia")
       case "memoria": loja.amostrarMemoria(forcar: true)

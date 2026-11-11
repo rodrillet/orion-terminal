@@ -54,7 +54,7 @@ func nomeLongoFerramenta(_ tipo: String) -> String { Ferramenta.de(tipo)?.nomeLo
 /// (o que ele faz). A ferramenta e a conta continuam sendo do painel.
 struct Persona: Equatable {
   var nome: String
-  var avatar: String      // um emoji
+  var avatar: String      // forma do mascote (Mascote.formas)
   var cor: String
   var papel: String       // "Maestro", "Dev", "Revisor"… (vazio = sem papel definido)
 
@@ -67,28 +67,27 @@ struct Persona: Equatable {
   init?(_ d: [String: Any]?) {
     guard let d, let n = d["nome"] as? String, !n.isEmpty else { return nil }
     nome = n
-    avatar = d["avatar"] as? String ?? "🤖"
+    avatar = d["avatar"] as? String ?? ""
     cor = d["cor"] as? String ?? "#7aa2ff"
     papel = d["papel"] as? String ?? ""
   }
 
-  /// Elenco: estrelas e constelações (a família é Orion), cada uma com o seu bicho e a sua cor.
+  /// Elenco: estrelas e constelações (a família é Orion), cada uma com a sua forma e a sua cor.
   static let elenco: [Persona] = [
-    Persona(nome: "Rigel", avatar: "🦊", cor: "#ff9e66"), Persona(nome: "Vega", avatar: "🦉", cor: "#7aa2ff"),
-    Persona(nome: "Lyra", avatar: "🐱", cor: "#ff79c6"), Persona(nome: "Sirius", avatar: "🐺", cor: "#9aa7ff"),
-    Persona(nome: "Nova", avatar: "🐙", cor: "#b79cff"), Persona(nome: "Atlas", avatar: "🐻", cor: "#c9a27a"),
-    Persona(nome: "Luna", avatar: "🐰", cor: "#c8cbe6"), Persona(nome: "Altair", avatar: "🦅", cor: "#f5d76e"),
-    Persona(nome: "Cosmo", avatar: "🐼", cor: "#9ee37d"), Persona(nome: "Astra", avatar: "🦄", cor: "#ff9ecb"),
-    Persona(nome: "Polaris", avatar: "🐧", cor: "#6fd6d6"), Persona(nome: "Mira", avatar: "🦋", cor: "#7ad7ff"),
-    Persona(nome: "Castor", avatar: "🦫", cor: "#d9a066"), Persona(nome: "Pólux", avatar: "🐯", cor: "#ffb454"),
-    Persona(nome: "Antares", avatar: "🦂", cor: "#ff6b6b"), Persona(nome: "Bella", avatar: "🐝", cor: "#f0c94a"),
-    Persona(nome: "Deneb", avatar: "🦢", cor: "#b8c4ff"), Persona(nome: "Electra", avatar: "🦜", cor: "#7be0a0"),
-    Persona(nome: "Hadar", avatar: "🦁", cor: "#f2b05e"), Persona(nome: "Izar", avatar: "🐬", cor: "#5fb8ff"),
-    Persona(nome: "Kuma", avatar: "🐨", cor: "#aab4c4"), Persona(nome: "Maia", avatar: "🦩", cor: "#ff8fb0"),
-    Persona(nome: "Naos", avatar: "🐢", cor: "#7fd18b"), Persona(nome: "Talita", avatar: "🦔", cor: "#c7a58a"),
+    Persona(nome: "Rigel", avatar: "gota", cor: "#ff9e66"), Persona(nome: "Vega", avatar: "bolha", cor: "#7aa2ff"),
+    Persona(nome: "Lyra", avatar: "nuvem", cor: "#ff79c6"), Persona(nome: "Sirius", avatar: "pilula", cor: "#9aa7ff"),
+    Persona(nome: "Nova", avatar: "hexa", cor: "#b79cff"), Persona(nome: "Atlas", avatar: "flor", cor: "#c9a27a"),
+    Persona(nome: "Luna", avatar: "fantasma", cor: "#c8cbe6"), Persona(nome: "Altair", avatar: "losango", cor: "#f5d76e"),
+    Persona(nome: "Cosmo", avatar: "gota", cor: "#9ee37d"), Persona(nome: "Astra", avatar: "bolha", cor: "#ff9ecb"),
+    Persona(nome: "Polaris", avatar: "nuvem", cor: "#6fd6d6"), Persona(nome: "Mira", avatar: "pilula", cor: "#7ad7ff"),
+    Persona(nome: "Castor", avatar: "hexa", cor: "#d9a066"), Persona(nome: "Pólux", avatar: "flor", cor: "#ffb454"),
+    Persona(nome: "Antares", avatar: "fantasma", cor: "#ff6b6b"), Persona(nome: "Bella", avatar: "losango", cor: "#f0c94a"),
+    Persona(nome: "Deneb", avatar: "gota", cor: "#b8c4ff"), Persona(nome: "Electra", avatar: "bolha", cor: "#7be0a0"),
+    Persona(nome: "Hadar", avatar: "nuvem", cor: "#f2b05e"), Persona(nome: "Izar", avatar: "pilula", cor: "#5fb8ff"),
+    Persona(nome: "Kuma", avatar: "hexa", cor: "#aab4c4"), Persona(nome: "Maia", avatar: "flor", cor: "#ff8fb0"),
+    Persona(nome: "Naos", avatar: "fantasma", cor: "#7fd18b"), Persona(nome: "Talita", avatar: "losango", cor: "#c7a58a"),
   ]
-  static let avatares = ["🦊", "🦉", "🐱", "🐺", "🐙", "🐻", "🐰", "🦅", "🐼", "🦄", "🐧", "🦋", "🦫", "🐯", "🦂", "🐝", "🦢", "🦜", "🦁", "🐬", "🐨", "🦩", "🐢", "🦔",
-                         "🤖", "👾", "🧠", "🎼", "🧪", "🛠️", "🔍", "✍️", "🎨", "📊", "🚀", "🛡️"]
+  static var avatares: [String] { Mascote.formas }
   static let papeis = ["Maestro", "Dev", "Revisor", "Testes", "Pesquisa", "Design", "Conteúdo", "Dados", "Infra"]
 
   /// Próximo personagem livre (os nomes em uso ficam para depois; acabando, repete com número).
