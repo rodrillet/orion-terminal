@@ -42,6 +42,9 @@ final class Controle {
   func parar() { if fd >= 0 { close(fd); unlink(Controle.caminho) } }
 
   private func atender(_ c: Int32) {
+    // Um cliente que conecta e não manda a linha não pode travar a fila de todos os `orion`.
+    var limite = timeval(tv_sec: 10, tv_usec: 0)
+    setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &limite, socklen_t(MemoryLayout<timeval>.size))
     var dados = Data()
     var buf = [UInt8](repeating: 0, count: 65536)
     while true {
@@ -82,7 +85,7 @@ final class Controle {
       return loja.painelAtivo
     }
     func erro(_ m: String) { fim(["ok": false, "erro": m]) }
-    /// --anexo (imagens viram anexo; outros arquivos entram como @caminho), --mencionar e --para.
+    /// --anexo (imagens e arquivos viram anexo; arquivos entram na mensagem como @caminho), --mencionar e --para.
     func anexos() -> (lista: [Anexo], arquivos: [String], erro: String?) {
       var lista: [Anexo] = [], arquivos: [String] = []
       for bruto in p["anexos"] as? [String] ?? [] {
@@ -116,7 +119,13 @@ final class Controle {
                               "programa": x.ocioso ? "shell" : x.processo, "voce": x.id == origem,
                               "apelido": x.apelido, "memoria": Int(x.memoria / 1_048_576)]
       if let m = x.marca { d["marca"] = m }
-      if let ps = x.persona { d["personagem"] = ps.nome; d["avatar"] = ps.avatar; d["papel"] = ps.papel }
+      if let pr = x.pr { d["pr"] = pr }
+      if x.hibernado { d["hibernado"] = true }
+      if let st = a?.setor { d["setor"] = st }
+      if let ps = x.persona { d["personagem"] = ps.nome; d["avatar"] = ps.avatar; d["papel"] = ps.papel; if !ps.descricao.isEmpty { d["descricao"] = ps.descricao } }
+      if let perm = x.permissao { d["permissao"] = ["pergunta": perm.pergunta, "detalhe": perm.detalhe, "opcoes": perm.opcoes.map { "\($0.id). \($0.rotulo)" }] }
+      let fila = loja.naFila(para: x.id)
+      if fila > 0 { d["caixa"] = fila }
       if let pai = x.pai { d["pai"] = pai; d["paiNome"] = loja.acharPainel(pai)?.persona?.nome ?? "" }
       if let t = x.tarefa { d["tarefa"] = t }
       let nFilhos = loja.filhos(de: x.id).count
@@ -212,15 +221,24 @@ final class Controle {
       }
       let pasta = (p["pasta"] as? String).map { ($0 as NSString).expandingTildeInPath } ?? pai?.cwd ?? w?.pasta
       var persona: Persona?
-      if p["nome"] != nil || p["papel"] != nil {
+      if p["nome"] != nil || p["papel"] != nil || p["descricao"] != nil {
         var ps = loja.novaPersona(papel: p["papel"] as? String ?? (pai != nil ? "Subagente" : ""))
-        if let n = p["nome"] as? String, !n.isEmpty { ps.nome = n }
+        if let n = p["nome"] as? String, !n.isEmpty {
+          ps.nome = n
+          // Nome do elenco (Lyra, Atlas…): vem com a forma e a cor daquele personagem.
+          if let e = Persona.elenco.first(where: { $0.nome.compare(n, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
+            ps.avatar = e.avatar; ps.cor = e.cor
+          }
+        }
+        if let dsc = p["descricao"] as? String { ps.descricao = String(dsc.prefix(2000)) }
         persona = ps
       }
       let mensagem = p["mensagem"] as? String
       let a = loja.criarAba(kind: kind, cwd: pasta, workspace: w?.id, conta: p["conta"] as? String, comando: comando,
                             titulo: p["titulo"] as? String, ativar: p["fundo"] as? Bool != true && pai == nil,
                             persona: persona, pai: pai?.id, tarefa: mensagem)
+      if let st = p["setor"] as? String, !st.isEmpty { loja.definirSetor(a, st) }
+      else if let pa = pai?.aba, let st = pa.setor { a.setor = st }     // subagente nasce no setor do maestro
       let novo = loja.painelPrincipal(a)
       novo?.no.retorno = p["retorno"] as? Bool == true
       if p["maestro"] as? Bool == true { novo?.maestro = true }
@@ -236,7 +254,7 @@ final class Controle {
     case "resultado":
       // O que o agente escreveu depois da última mensagem que recebeu (ou a tela recente).
       guard let x = painel(padraoOrigem: false) else { return erro("painel não encontrado") }
-      let ultimo = x.baloes().last { !$0.meu }?.texto
+      let ultimo = x.baloesConversa().last { !$0.meu && !$0.texto.isEmpty }?.texto
       let linhas = p["linhas"] as? Int ?? 120
       let corpo = ultimo.map { t -> String in
         let ls = t.split(separator: "\n", omittingEmptySubsequences: false)
@@ -251,6 +269,7 @@ final class Controle {
       var ps = x.persona ?? loja.novaPersona()
       if let n = p["nome"] as? String, !n.isEmpty { ps.nome = n }
       if let r = p["papel"] as? String { ps.papel = r }
+      if let dsc = p["descricao"] as? String { ps.descricao = String(dsc.prefix(2000)) }
       if let a = (p["avatar"] as? String)?.lowercased(), !a.isEmpty {
         guard Mascote.formas.contains(a) else { return erro("avatar desconhecido: use \(Mascote.formas.joined(separator: ", "))") }
         ps.avatar = a
@@ -298,10 +317,119 @@ final class Controle {
         } } }
       }
 
+    case "mandar":
+      // Caixa de entrada: a mensagem entra quando o destinatário estiver livre; devolve o id na hora.
+      let ref = p["painel"] as? String ?? ""
+      let t = (p["texto"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      let extras = anexos()
+      if let e = extras.erro { return erro(e) }
+      guard !t.isEmpty || !extras.lista.isEmpty || !extras.arquivos.isEmpty else { return erro("mensagem vazia") }
+      let eu = origem.flatMap { loja.painelExistente($0) }
+      // @time (ou --setor sem destinatário): o roteador escolhe quem recebe.
+      if Loja.ehTime(ref) || (ref.isEmpty && p["setor"] != nil) {
+        let wid = workspace()?.id ?? eu?.aba.flatMap { loja.workspace(de: $0) }?.id ?? loja.workspaceAtivoID
+        let caminhos = extras.lista.filter { $0.tipo == .imagem }.map(\.valor) + extras.arquivos
+        guard let m = loja.mandarAoTime(de: eu, texto: t, anexos: caminhos, workspace: wid, setor: p["setor"] as? String,
+                                        esperaResposta: p["semResposta"] as? Bool != true) else { return erro("nenhum outro agente neste workspace\((p["setor"] as? String).map { " / setor \($0)" } ?? "")") }
+        return fim(["ok": true, "id": m.id, "para": m.para, "paraNome": m.paraNome, "estado": m.estado.rawValue,
+                    "esperaResposta": m.esperaResposta, "roteada": true, "depois": m.rota.compactMap { loja.acharPainel($0).map { "@" + $0.apelido } }])
+      }
+      guard let destino = loja.acharDestino(ref) else { return erro("destinatário não encontrado (use o id, @apelido, o nome ou @time)") }
+      if eu === destino { return erro("você não pode mandar mensagem para si mesmo") }
+      let caminhos = extras.lista.filter { $0.tipo == .imagem }.map(\.valor) + extras.arquivos
+      let m = loja.mandar(de: eu, para: destino, texto: t, anexos: caminhos, esperaResposta: p["semResposta"] as? Bool != true)
+      let atual = loja.mensagem(m.id) ?? m
+      fim(["ok": true, "id": m.id, "para": destino.id, "paraNome": m.paraNome, "estado": atual.estado.rawValue, "esperaResposta": m.esperaResposta])
+
+    case "responder":
+      guard let id = p["mensagem"] as? String, let t = p["texto"] as? String, !t.isEmpty else { return erro("use: orion responder ID_DA_MENSAGEM \"texto\"") }
+      let extras = anexos()
+      if let e = extras.erro { return erro(e) }
+      let eu = origem.flatMap { loja.painelExistente($0) }
+      let caminhos = extras.lista.filter { $0.tipo == .imagem }.map(\.valor) + extras.arquivos
+      if Loja.ehPasse(t) {
+        let (prox, e) = loja.passar(id, de: eu, motivo: nil)
+        if let e { return erro(e) }
+        return fim(["ok": true, "id": id, "passou": true, "para": prox.map { "@" + $0.apelido } ?? "ninguém (quem mandou foi avisado)"])
+      }
+      let (r, e) = loja.responder(id, de: eu, texto: t, anexos: caminhos)
+      if let e { return erro(e) }
+      fim(["ok": true, "id": r?.id ?? "", "respostaA": id, "para": r?.paraNome ?? "você"])
+
+    case "caixa":
+      // Mensagens de/para um painel (padrão: quem chama; fora do Orion, todas).
+      let alvo = (p["painel"] as? String).flatMap { loja.acharDestino($0) } ?? origem.flatMap { loja.painelExistente($0) }
+      let todas = p["tudo"] as? Bool == true || alvo == nil
+      let lista = loja.caixa.filter { todas || $0.para == alvo!.id || $0.de == alvo!.id }.suffix(p["linhas"] as? Int ?? 30)
+      fim(["ok": true, "painel": alvo?.id ?? "", "mensagens": lista.map { m -> [String: Any] in
+        var d = m.dicionario
+        d["rotulo"] = m.rotuloEstado
+        d["entrada"] = m.para == alvo?.id
+        return d
+      }])
+
+    case "passar":
+      guard let id = p["mensagem"] as? String, !id.isEmpty else { return erro("use: orion passar ID_DA_MENSAGEM [\"motivo\"]") }
+      let eu = origem.flatMap { loja.painelExistente($0) }
+      let (prox, e) = loja.passar(id, de: eu, motivo: p["texto"] as? String)
+      if let e { return erro(e) }
+      fim(["ok": true, "id": id, "proximo": prox.map { "@" + $0.apelido } ?? ""])
+
+    case "cancelar":
+      guard let id = p["mensagem"] as? String else { return erro("use: orion cancelar ID_DA_MENSAGEM") }
+      guard loja.cancelarMensagem(id) else { return erro("só dá para cancelar mensagem que ainda está na fila") }
+      fim(["ok": true, "id": id])
+
+    case "equipe":
+      // Quem é quem: agentes do workspace (padrão: o de quem chama) com papel e descrição.
+      let w = workspace() ?? origem.flatMap { loja.painelExistente($0)?.aba }.flatMap { loja.workspace(de: $0) }
+      let lista = loja.agentes(workspace: p["tudo"] as? Bool == true ? nil : w?.id)
+      fim(["ok": true, "workspace": w?.nome ?? "", "agentes": lista.map(descrever)])
+
     case "interromper":
       guard let x = painel(padraoOrigem: false) else { return erro("painel não encontrado") }
       guard x.vivo else { return erro("o painel não está rodando") }
-      x.interromper()
+      // Pedidos de quem interrompe que ainda estão na fila saem primeiro.
+      var cancelados: [String] = []
+      if let o = origem {
+        for m in loja.caixa where m.de == o && m.para == x.id && m.estado == .naFila {
+          if loja.cancelarMensagem(m.id, motivo: "cancelada por quem mandou") { cancelados.append(m.id) }
+        }
+      }
+      // Um agente só interrompe quem trabalha para ele: um subagente seu ou alguém com um pedido
+      // seu em andamento. Você (fora de um painel) e --forcar podem sempre.
+      if let o = origem, let eu = loja.painelExistente(o), eu !== x, p["forcar"] as? Bool != true {
+        let filho = x.pai == eu.id
+        let pedido = loja.caixa.contains { $0.de == eu.id && $0.para == x.id && $0.estado == .entregue }
+        guard filho || pedido else {
+          if !cancelados.isEmpty {
+            return fim(["ok": true, "painel": x.id, "interrompido": false, "cancelados": cancelados])
+          }
+          return erro("@\(x.apelido) não está trabalhando para você (não é seu subagente nem tem um pedido seu). Peça ao usuário, ou use --forcar se ele mandou.")
+        }
+      }
+      if let motivo = (p["motivo"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !motivo.isEmpty {
+        loja.pararComMotivo(x, motivo: motivo, de: origem.flatMap { loja.painelExistente($0) })
+      } else {
+        x.interromper()
+      }
+      fim(["ok": true, "painel": x.id, "interrompido": true, "cancelados": cancelados])
+
+    case "setor":
+      guard let x = painel(padraoOrigem: true), let a = x.aba else { return erro("painel não encontrado") }
+      let nome = (p["setor"] as? String) ?? ""
+      loja.definirSetor(a, nome.isEmpty ? nil : nome)
+      fim(["ok": true, "painel": x.id, "setor": a.setor ?? ""])
+
+    case "hibernar":
+      guard let x = painel(padraoOrigem: false) else { return erro("painel não encontrado") }
+      if let motivo = x.impedimentoHibernar(minimo: 0) { return erro("não dá para hibernar: \(motivo)") }
+      guard x.hibernar() else { return erro("não achei o id da conversa para retomar depois") }
+      fim(["ok": true, "painel": x.id, "retomar": x.comandoRetomar ?? ""])
+
+    case "acordar":
+      guard let x = painel(padraoOrigem: false) else { return erro("painel não encontrado") }
+      x.acordar()
       fim(["ok": true, "painel": x.id])
 
     case "reiniciar":
@@ -531,8 +659,9 @@ final class Controle {
         x.escrever(t + ((p["enter"] as? Bool) == true ? "\r" : ""))
       } else {
         // Com anexos ou menções: mesma montagem do compose (imagens como caminho, contexto em bloco).
-        let texto = ([t] + extras.arquivos.map { Compose.mencao(Compose.referencia($0, cwd: x.cwd)) }).filter { !$0.isEmpty }.joined(separator: " ")
-        loja.enviarComposto(de: x, texto: texto, anexos: extras.lista, enter: (p["enter"] as? Bool) == true)
+        // Arquivos vão como anexo (entram na mensagem como @caminho e aparecem na conversa).
+        let arquivos = extras.arquivos.map { Anexo(tipo: .arquivo, valor: $0, rotulo: ($0 as NSString).lastPathComponent) }
+        loja.enviarComposto(de: x, texto: t, anexos: extras.lista + arquivos, enter: (p["enter"] as? Bool) == true)
       }
       fim(["ok": true, "painel": x.id])
 
@@ -546,7 +675,7 @@ final class Controle {
       if let t = p["texto"] as? String { x.rascunho.definir(t) }
       if p["limpar"] as? Bool == true { x.rascunho.anexos = [] }
       extras.lista.forEach { x.rascunho.anexar($0) }
-      for a in extras.arquivos { x.mencionarNoCompose(caminho: a) }
+      if !extras.arquivos.isEmpty { x.anexar(caminhos: extras.arquivos) }     // cartões com prévia, como no arrasto
       if p["focar"] as? Bool == true { loja.focar(x, teclado: false); x.focarCompose() }
       fim(["ok": true, "painel": x.id, "texto": x.rascunho.texto, "anexos": x.rascunho.anexos.map { ["tipo": $0.tipo.rawValue, "valor": $0.valor] }])
 
@@ -698,6 +827,7 @@ final class Controle {
       case "workspaces": loja.pedirWorkspaces += 1
       case "historico", "agentes": loja.ajustes.barraLateral = true; loja.abrirQuadro(false); loja.modoLateral = (p["alvo"] as? String) ?? "agentes"
       case "novo-workspace": loja.novoWorkspacePerguntando()
+      case "proximo", "esperando": loja.irParaProximoEsperando()
       case "temas": d?.abrirAjustes(aba: "aparencia")
       case "memoria": loja.amostrarMemoria(forcar: true)
       case "fechar":

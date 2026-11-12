@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 NOME="Orion Terminal"
-VERSAO="0.7.0"
+VERSAO="0.8.0"
 ID="com.rodrillet.orion-terminal"
 INSTALAR=0 ABRIR=0 PUBLICO=0
 for a in "$@"; do

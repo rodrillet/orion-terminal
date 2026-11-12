@@ -37,6 +37,7 @@ final class Dialogo: Identifiable {
   var nomePersona = ""
   var avatar = "🦊"
   var papel = ""
+  var descricao = ""
   var pai: String?                         // maestro deste subagente
 
   @ObservationIgnored var aoConfirmar: (Dialogo) -> Void = { _ in }
@@ -202,10 +203,11 @@ extension Loja {
   func editarPersonagem(_ p: Painel) {
     let atual = p.persona ?? novaPersona()
     let d = Dialogo(.personagem, titulo: "Personagem", texto: "Quem é este agente na equipe. O nome também é como você o menciona no compose (@\(p.apelido)).", ok: "Salvar")
-    d.nomePersona = atual.nome; d.avatar = atual.avatar; d.cor = atual.cor; d.papel = atual.papel
+    d.nomePersona = atual.nome; d.avatar = atual.avatar; d.cor = atual.cor; d.papel = atual.papel; d.descricao = atual.descricao
     d.kind = p.tipoAgente ?? "claude"
     d.aoConfirmar = { [weak self, weak p] d in
-      p?.persona = Persona(nome: d.nomePersona.trimmingCharacters(in: .whitespaces), avatar: d.avatar, cor: d.cor, papel: d.papel.trimmingCharacters(in: .whitespaces))
+      p?.persona = Persona(nome: d.nomePersona.trimmingCharacters(in: .whitespaces), avatar: d.avatar, cor: d.cor, papel: d.papel.trimmingCharacters(in: .whitespaces),
+                           descricao: d.descricao.trimmingCharacters(in: .whitespacesAndNewlines))
       self?.salvarDepois()
     }
     mostrar(d)
@@ -246,6 +248,31 @@ extension Loja {
 
 // MARK: - Views
 
+/// Aviso curto ("Copiado") que sobe do rodapé da janela.
+struct CamadaAviso: View {
+  @Bindable var loja: Loja
+  var body: some View {
+    VStack {
+      Spacer()
+      if let a = loja.aviso {
+        HStack(spacing: 6) {
+          Image(systemName: "checkmark.circle.fill").foregroundStyle(Cor.verde)
+          Text(a.texto).foregroundStyle(Cor.texto)
+        }
+        .font(F.ui(12, .medium))
+        .padding(.horizontal, 12).frame(height: 30)
+        .cartaoFlutuante(raio: 15)
+        .padding(.bottom, 56)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .id(a.id)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .allowsHitTesting(false)
+    .animation(.easeOut(duration: 0.16), value: loja.aviso?.id)
+  }
+}
+
 /// Camada do diálogo: véu + cartão centralizado. Uma por janela (principal e ajustes).
 struct CamadaDialogo: View {
   @Bindable var loja: Loja
@@ -270,40 +297,54 @@ struct CartaoDialogo: View {
   @Bindable var d: Dialogo
   @FocusState private var foco: Bool
 
+  /// Confirmação/aviso: cartão pequeno, sem campos.
+  private var simples: Bool { d.tipo == .confirmar }
+
+  private var larguraMaxima: CGFloat {
+    switch d.tipo {
+    case .agente, .workspace, .personagem: return 500
+    case .confirmar: return 360
+    default: return 420
+    }
+  }
+
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
+    VStack(alignment: .leading, spacing: simples ? 16 : 14) {
       HStack(alignment: .top, spacing: 12) {
         if let p = d.programa {
-          IconePrograma(processo: p, tamanho: 36)
+          IconePrograma(processo: p, tamanho: 32)
         } else if let s = d.simbolo {
-          Image(systemName: s).font(.system(size: 17, weight: .semibold))
+          Image(systemName: s).font(.system(size: 14, weight: .semibold))
             .foregroundStyle(d.destrutivo ? Cor.vermelho : Cor.acento)
-            .frame(width: 36, height: 36)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill((d.destrutivo ? Cor.vermelho : Cor.acento).opacity(0.14)))
+            .frame(width: 30, height: 30)
+            .background(Circle().fill((d.destrutivo ? Cor.vermelho : Cor.acento).opacity(0.14)))
         }
-        VStack(alignment: .leading, spacing: 5) {
-          Text(d.titulo).font(F.ui(15, .semibold)).foregroundStyle(Cor.texto).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 4) {
+          Text(d.titulo).font(F.ui(14, .semibold)).foregroundStyle(Cor.texto).fixedSize(horizontal: false, vertical: true)
           if !d.texto.isEmpty {
-            Text(d.texto).font(F.ui(12.5)).foregroundStyle(Cor.texto2).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+            Text(d.texto).font(F.ui(12)).foregroundStyle(Cor.texto2).lineSpacing(1.5).fixedSize(horizontal: false, vertical: true)
           }
         }
+        .padding(.top, d.simbolo != nil || d.programa != nil ? 2 : 0)
         Spacer(minLength: 0)
       }
-      // Cabe na janela? Senão os campos rolam (janela pequena, fonte grande).
-      ViewThatFits(in: .vertical) {
-        campos
-        ScrollView { campos.padding(.trailing, 6) }.scrollIndicators(.visible)
+      if !simples {
+        // Cabe na janela? Senão os campos rolam (janela pequena, fonte grande).
+        ViewThatFits(in: .vertical) {
+          campos
+          ScrollView { campos.padding(.trailing, 6) }.scrollIndicators(.visible)
+        }
       }
       HStack(spacing: 8) {
         Spacer(minLength: 0)
-        if let c = d.cancelar { BotaoDialogo(titulo: c, atalho: "esc") { loja.cancelarDialogo() } }
-        BotaoDialogo(titulo: d.tipo == .agente ? "Abrir \(d.nomePersona.isEmpty ? nomeFerramenta(d.kind) : d.nomePersona)" : d.ok, atalho: "↩", primario: true, destrutivo: d.destrutivo,
-                     desligado: !d.valido) { loja.confirmarDialogo() }
+        if let c = d.cancelar { BotaoDialogo(titulo: c, atalho: simples ? "" : "esc", compacto: simples) { loja.cancelarDialogo() } }
+        BotaoDialogo(titulo: d.tipo == .agente ? "Abrir \(d.nomePersona.isEmpty ? nomeFerramenta(d.kind) : d.nomePersona)" : d.ok,
+                     atalho: simples ? "" : "↩", primario: true, destrutivo: d.destrutivo, desligado: !d.valido, compacto: simples) { loja.confirmarDialogo() }
       }
-      .padding(.top, 2)
     }
-    .padding(20)
-    .frame(maxWidth: d.tipo == .agente || d.tipo == .workspace || d.tipo == .personagem ? 500 : 420)
+    .padding(simples ? 16 : 20)
+    .frame(maxWidth: larguraMaxima)
+    .fixedSize(horizontal: false, vertical: true)          // nunca estica até a altura da janela
     .cartaoFlutuante(raio: R.cartao + 4)
     .onTapGesture { }
     .onAppear { DispatchQueue.main.async { foco = true } }
@@ -325,7 +366,7 @@ struct CartaoDialogo: View {
   @ViewBuilder var camposPersonagem: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 12) {
-        AvatarPersona(persona: Persona(nome: d.nomePersona, avatar: d.avatar, cor: d.cor), tamanho: 52, ferramenta: d.kind)
+        AvatarPersona(persona: Persona(nome: d.nomePersona, avatar: d.avatar, cor: d.cor, papel: d.papel), tamanho: 52, ferramenta: d.kind, fixo: true)
         VStack(spacing: 8) {
           CampoDialogo(texto: $d.nomePersona, dica: "Nome").focused($foco)
           CampoDialogo(texto: $d.papel, dica: "Papel — o que ele faz (Dev, Revisor, Pesquisa…)")
@@ -337,15 +378,19 @@ struct CartaoDialogo: View {
           Text(p).font(F.ui(11, .medium)).foregroundStyle(d.papel == p ? Cor.texto : Cor.texto3).fixedSize()
             .padding(.horizontal, 8).frame(height: F.m(22))
             .background(Capsule().fill(d.papel == p ? Cor.vidro2 : Cor.vidro))
-            .contentShape(Capsule()).onTapGesture { d.papel = p }.help("Papel: \(p)")
+            .contentShape(Capsule()).onTapGesture { d.papel = p }
+            .help("Papel: \(p)\(Self.dicaAcessorio(p))")
         }
        }
       }
+      Rotulo("Descrição — o que ele faz e quando mandar trabalho para ele (os colegas leem em orion equipe)")
+      CampoDialogo(texto: $d.descricao, dica: "Ex.: cuida do front-end em React; mande telas e bugs de interface", linhas: 3)
       Rotulo("Avatar")
       let atual = Mascote.forma(Persona(nome: d.nomePersona, avatar: d.avatar, cor: d.cor))
       LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 8), spacing: 6) {
         ForEach(Mascote.formas, id: \.self) { a in
-          DesenhoMascote(forma: a, cor: d.cor, tamanho: 34, humor: atual == a ? .atento : .normal)
+          DesenhoMascote(forma: a, cor: d.cor, tamanho: 34, humor: atual == a ? .atento : .normal,
+                         acessorio: Acessorio.de(papel: d.papel, maestro: false))
             .frame(maxWidth: .infinity).frame(height: 48)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(atual == a ? Color(hex: d.cor).opacity(0.18) : Cor.vidro))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(atual == a ? Color(hex: d.cor).opacity(0.8) : .clear))
@@ -360,6 +405,19 @@ struct CartaoDialogo: View {
             .contentShape(Circle()).onTapGesture { d.cor = c }.help(nomeCor(c))
         }
       }
+    }
+  }
+
+  /// O papel também veste o mascote: mostra qual acessório ele ganha.
+  static func dicaAcessorio(_ papel: String) -> String {
+    switch Acessorio.de(papel: papel, maestro: false) {
+    case .coroa: return " — ganha a coroa"
+    case .oculos: return " — ganha óculos"
+    case .antena: return " — ganha uma antena"
+    case .fones: return " — ganha fones"
+    case .lupa: return " — ganha uma lupa"
+    case .boina: return " — ganha uma boina"
+    case .nenhum: return ""
     }
   }
 
@@ -424,7 +482,7 @@ struct CartaoDialogo: View {
       CampoDialogo(texto: $d.mensagem, dica: "Ex.: revisar a landing do cliente e listar o que falta", linhas: 3).focused($foco)
       Rotulo("Personagem")
       HStack(spacing: 8) {
-        AvatarPersona(persona: Persona(nome: d.nomePersona, avatar: d.avatar, cor: d.cor), tamanho: 34, ferramenta: d.kind)
+        AvatarPersona(persona: Persona(nome: d.nomePersona, avatar: d.avatar, cor: d.cor), tamanho: 34, ferramenta: d.kind, fixo: true)
           .contentShape(Rectangle())
           .onTapGesture { d.avatar = Mascote.proxima(Mascote.forma(Persona(nome: d.nomePersona, avatar: d.avatar, cor: d.cor))) }
           .help("Clique para trocar a forma")
@@ -562,6 +620,7 @@ struct BotaoDialogo: View {
   var primario = false
   var destrutivo = false
   var desligado = false
+  var compacto = false
   let acao: () -> Void
   @Estado private var sobre = false
   var body: some View {
@@ -569,11 +628,11 @@ struct BotaoDialogo: View {
     let frente: Color = primario ? (destrutivo ? .white : Cor.sobreAcento) : Cor.texto
     Button(action: acao) {
       HStack(spacing: 7) {
-        Text(titulo).font(F.ui(13, .medium))
+        Text(titulo).font(F.ui(compacto ? 12.5 : 13, .medium))
         if !atalho.isEmpty { Text(atalho).font(F.ui(11)).opacity(0.6) }
       }
       .foregroundStyle(frente)
-      .padding(.horizontal, 14).frame(height: F.m(34))
+      .padding(.horizontal, compacto ? 12 : 14).frame(minWidth: compacto ? 72 : 0).frame(height: F.m(compacto ? 28 : 34))
       .background(RoundedRectangle(cornerRadius: R.controle, style: .continuous).fill(fundo).brightness(sobre ? (Cor.claro ? -0.04 : 0.06) : 0))
       .overlay(RoundedRectangle(cornerRadius: R.controle, style: .continuous).strokeBorder(primario ? Color.clear : Cor.linha))
       .contentShape(Rectangle())

@@ -38,6 +38,8 @@ final class Loja {
   var temaEmEdicao: String?
   /// Agentes fechados há pouco (para reabrir com a mesma conversa).
   var fechados: [Fechado] = []
+  /// Caixa de entrada dos agentes (mensagens na fila, entregues, respondidas…).
+  var caixa: [Mensagem] = []
   /// Portas TCP em escuta (servidores), com o painel de cada uma quando é deste app.
   var portas: [Porta] = []
   var portasLendo = false
@@ -48,6 +50,8 @@ final class Loja {
   var pedirWorkspaces = 0
   /// Muda para mandar fechar os popovers abertos (portas, memória, fechados, notificações).
   var fecharPopovers = 0
+  /// Aviso curto no rodapé da janela ("Copiado"), some sozinho.
+  var aviso: (id: Int, texto: String)?
 
   // Quadro de agentes
   var quadroAberto = false
@@ -87,6 +91,7 @@ final class Loja {
     aplicarAparencia(avisar: false)
     historicoCompose = (Armazem.ler("compose.json") as? [String]) ?? []
     fechados = ((Armazem.ler("fechados.json") as? [[String: Any]]) ?? []).compactMap(Fechado.init)
+    carregarCaixa()
     Compose.limparAnexosAntigos()
   }
 
@@ -116,6 +121,9 @@ final class Loja {
     ap.escala = CGFloat(ajustes.escalaUI)
     ap.raio = CGFloat(ajustes.raio)
     ap.sombras = ajustes.sombras
+    ap.mascote = CGFloat(ajustes.tamanhoMascote)
+    ap.animarMascotes = ajustes.mascotesAnimados
+    RelogioMascote.shared.ligado = ajustes.mascotesAnimados
     guard avisar else { return }
     ap.versao += 1
     (NSApp.delegate as? Delegado)?.aplicarVidro()
@@ -231,6 +239,70 @@ final class Loja {
     return (t, e)
   }
 
+  // MARK: - Setores (grupos de agentes dentro do workspace)
+
+  /// Põe a aba num setor (criando o setor se for novo); nil tira do setor.
+  func definirSetor(_ a: Aba, _ nome: String?) {
+    let n = nome?.trimmingCharacters(in: .whitespaces)
+    if let n, !n.isEmpty, let w = workspace(a.workspace), !w.setores.contains(n) { w.setores.append(String(n.prefix(40))) }
+    a.setor = (n?.isEmpty ?? true) ? nil : String(n!.prefix(40))
+    salvarDepois()
+  }
+
+  func novoSetorPerguntando(para a: Aba? = nil, workspace wid: String? = nil) {
+    perguntar("Novo setor", texto: "Setores agrupam os agentes do workspace na barra lateral e no quadro (ex.: Site, Tráfego, Conteúdo).",
+              ok: "Criar setor", dica: "Nome do setor", simbolo: "rectangle.3.group") { [weak self] nome in
+      guard let self else { return }
+      let n = nome.trimmingCharacters(in: .whitespaces)
+      guard !n.isEmpty else { return }
+      if let a { self.definirSetor(a, n) }
+      else if let w = self.workspace(wid ?? self.workspaceAtivoID ?? ""), !w.setores.contains(n) { w.setores.append(String(n.prefix(40))); self.salvarDepois() }
+    }
+  }
+
+  func renomearSetorPerguntando(_ w: Workspace, _ antigo: String) {
+    perguntar("Renomear setor", valor: antigo, ok: "Renomear", simbolo: "pencil") { [weak self] novo in
+      guard let self else { return }
+      let n = String(novo.trimmingCharacters(in: .whitespaces).prefix(40))
+      guard !n.isEmpty, n != antigo, let i = w.setores.firstIndex(of: antigo) else { return }
+      if w.setores.contains(n) { w.setores.remove(at: i) } else { w.setores[i] = n }
+      for a in self.abas(de: w) where a.setor == antigo { a.setor = n }
+      self.salvarDepois()
+    }
+  }
+
+  /// Apaga o setor; os agentes dele ficam sem setor (nada é fechado).
+  func apagarSetor(_ w: Workspace, _ nome: String) {
+    w.setores.removeAll { $0 == nome }
+    for a in abas(de: w) where a.setor == nome { a.setor = nil }
+    salvarDepois()
+  }
+
+  /// Agentes que esperam você, em ordem de urgência: primeiro quem pede permissão, depois quem
+  /// espera há mais tempo. `w` limita a um workspace.
+  func esperandoVoce(_ w: Workspace? = nil) -> [Painel] {
+    var lista: [Painel] = []
+    for a in todasEmOrdem where w == nil || a.workspace == w!.id {
+      for n in a.arvore.folhas {
+        guard let p = painel(id: n.id, aba: a), p.tipoAgente != nil else { continue }
+        if p.permissao != nil || p.estado == .esperando || (a.atencao && a.painelAtivo == p.id) { lista.append(p) }
+      }
+    }
+    return lista.sorted { ($0.permissao != nil ? 0 : 1, $0.desde) < ($1.permissao != nil ? 0 : 1, $1.desde) }
+  }
+
+  /// ⌘J: vai para o próximo agente que espera você (em qualquer workspace); repetir percorre a fila.
+  func irParaProximoEsperando() {
+    let lista = esperandoVoce()
+    guard !lista.isEmpty else { avisoRapido("Ninguém esperando você"); return }
+    let atual = painelAtivo?.id
+    let i = lista.firstIndex { $0.id == atual }.map { ($0 + 1) % lista.count } ?? 0
+    let p = lista[i]
+    guard let a = p.aba else { return }
+    ativar(a)
+    focar(p)
+  }
+
   /// Digita uma mensagem no agente e manda Enter logo depois (separado: os agentes tratam
   /// texto + Enter no mesmo bloco como colagem e não enviam).
   func enviarMensagem(_ p: Painel, _ texto: String) {
@@ -314,9 +386,12 @@ final class Loja {
   /// Um subagente parou de trabalhar e foi criado com retorno: o maestro recebe o aviso com o
   /// resultado (num arquivo, para não inundar a conversa dele).
   func entregarAoPai(_ filho: Painel) {
-    guard filho.no.retorno, let idPai = filho.pai, let pai = acharPainel(idPai), pai.vivo, pai.agente != nil else { return }
+    // Parou pedindo permissão não é "terminou". E o aviso vai pela caixa: colar direto no maestro
+    // ocupado (ou com uma pergunta aberta) fazia o Enter responder a pergunta dele.
+    guard filho.no.retorno, filho.permissao == nil, let idPai = filho.pai, let pai = acharPainel(idPai),
+          (pai.vivo && pai.agente != nil) || pai.hibernado else { return }
     let bloco = Compose.contexto(de: filho, apelido: filho.apelido, loja: self, linhas: 120, sempreArquivo: true)
-    enviarComposto(de: pai, texto: "[Subagente @\(filho.apelido) terminou — \(filho.titulo)]\n\(bloco)", anexos: [], lembrar: false)
+    mandar(de: filho, para: pai, texto: "[Subagente @\(filho.apelido) terminou — \(filho.titulo)]\n\(bloco)", esperaResposta: false)
   }
 
   // MARK: - Workspaces
@@ -402,11 +477,12 @@ final class Loja {
   @discardableResult
   func criarAba(kind: String = "shell", cwd: String? = nil, workspace: String? = nil, conta: String? = nil,
                 comando: String? = nil, titulo: String? = nil, ativar: Bool = true,
-                persona: Persona? = nil, papel: String? = nil, pai: String? = nil, tarefa: String? = nil) -> Aba {
+                persona: Persona? = nil, papel: String? = nil, pai: String? = nil, tarefa: String? = nil, idPainel: String? = nil) -> Aba {
     let w = workspace.flatMap { self.workspace($0) } ?? workspaceAtivo ?? criarWorkspace("Geral", simbolo: "house")
     let atual = abaAtiva?.workspace == w.id ? painelAtivo : nil
     let pasta = cwd ?? (ajustes.novaAbaNaPastaAtual ? atual?.cwd : nil) ?? w.pasta
-    let no = No(painel: "p-" + UUID().uuidString.prefix(10).lowercased(), cwd: pasta, kind: kind, comando: comando ?? comandoDoTipo(kind))
+    let id = idPainel.flatMap { acharPainel($0) == nil ? $0 : nil } ?? "p-" + UUID().uuidString.prefix(10).lowercased()
+    let no = No(painel: id, cwd: pasta, kind: kind, comando: comando ?? comandoDoTipo(kind))
     let a = Aba(workspace: w.id, kind: kind, arvore: no, contas: ajustes.contasPadrao)
     if let c = conta, let ct = contas.first(where: { $0.id == c }) { a.definirConta(ct.tipo, c) }
     a.titulo = titulo
@@ -438,7 +514,7 @@ final class Loja {
   func fecharPainel(_ p: Painel?, confirmado: Bool = false) {
     guard let p, let a = p.aba else { return }
     if !confirmado && ajustes.confirmarFechar && p.vivo && !p.ocioso {
-      confirmar("Fechar “\(p.titulo)”?", "Ainda está rodando: \(p.processo). Fechar encerra o processo.", "Fechar", destrutivo: true) { [weak self, weak p] in
+      confirmar("Fechar “\(p.titulo)”?", p.tipoAgente != nil ? "O agente para agora. Ele fica no Histórico para reabrir na mesma conversa." : "Ainda está rodando: \(p.processo). Fechar encerra o processo.", "Fechar", destrutivo: true, simbolo: "xmark") { [weak self, weak p] in
         self?.fecharPainel(p, confirmado: true)
       }
       return
@@ -464,7 +540,7 @@ final class Loja {
     guard let a else { return }
     let ocupados = paineisDaAba(a).filter { $0.vivo && !$0.ocioso }
     if !confirmado && ajustes.confirmarFechar && !ocupados.isEmpty {
-      confirmar("Fechar a aba “\(titulo(a))”?", "Ainda está rodando: \(ocupados.map(\.processo).joined(separator: ", ")).", "Fechar", destrutivo: true) { [weak self] in
+      confirmar("Fechar “\(titulo(a))”?", ocupados.contains { $0.tipoAgente != nil } ? "O agente para agora. Ele fica no Histórico para reabrir na mesma conversa." : "Ainda está rodando: \(ocupados.map(\.processo).joined(separator: ", ")).", "Fechar", destrutivo: true, simbolo: "xmark") { [weak self] in
         self?.fecharAba(a, confirmado: true)
       }
       return
@@ -713,13 +789,66 @@ final class Loja {
 
   private func tique() {
     for p in paineis.values where p.vivo { p.vigiar() }
+    processarCaixa()
     if Date() >= proximoUso { atualizarUsos() }
     contadorMemoria += 1
     // Memória a cada 10 s e portas a cada 12 s — e só com a janela à vista.
     if contadorMemoria % 10 == 2 { amostrarMemoria() }
-    if contadorMemoria % 12 == 5, ajustes.portas, paineis.values.contains(where: { $0.vivo && !$0.ocioso }) { atualizarPortas() }
+    // lsof é o mais caro do tique: só com a janela à vista, e a cada 20 s.
+    if contadorMemoria % 20 == 5, ajustes.portas, janela?.occlusionState.contains(.visible) ?? false,
+       paineis.values.contains(where: { $0.vivo && !$0.ocioso }) { atualizarPortas() }
+    if contadorMemoria % 30 == 20 { hibernarParados() }
+    // A cada 5 s: agente que escreveu algo novo e já parou — abriu um pull request?
+    if contadorMemoria % 5 == 3 {
+      for p in paineis.values where p.vivo && p.agente != nil && p.estado != .trabalhando
+        && p.leitor.ultimaSaida > p.prVistoEm && Date().timeIntervalSince(p.leitor.ultimaSaida) > 2 {
+        p.prVistoEm = Date()
+        procurarPR(p)
+      }
+    }
     // De minuto em minuto, devolve ao sistema a memória que ficou livre no heap.
     if contadorMemoria % 60 == 30 { Memoria.aliviar() }
+  }
+
+  /// Agentes parados há mais que o ajuste, fora da aba ativa, hibernam (o processo fecha e a
+  /// conversa volta com --resume quando você abre ou manda mensagem). A checagem dos processos
+  /// filhos é barata, mas roda só a cada 30 s e só para quem já passou do tempo.
+  func hibernarParados() {
+    let minutos = ajustes.hibernarMinutos
+    guard minutos > 0 else { return }
+    var liberados = 0
+    let candidatos = paineis.values.filter { $0.vivo && $0.agente != nil && $0.aba?.id != abaAtivaID }
+    for p in candidatos {
+      guard p.impedimentoHibernar(minimo: minutos * 60) == nil else { continue }
+      let antes = p.memoria
+      if p.hibernar() { liberados += 1; memoriaPaineis -= min(memoriaPaineis, antes) }
+    }
+    // Mac apertado (menos de 1,5 GB para dar): hiberna antes da hora quem está parado há mais de
+    // 5 min, do que parou há mais tempo para o mais recente, até voltar a ter folga.
+    if Memoria.disponivel() < 1_610_612_736 {
+      let parados = candidatos.filter { $0.vivo && $0.impedimentoHibernar(minimo: 300) == nil }
+        .sorted { max($0.desde, $0.ultimaEntrada) < max($1.desde, $1.ultimaEntrada) }
+      // O processo leva um instante para morrer: conta a memória dele como já devolvida.
+      var folga = Memoria.disponivel()
+      var nomes: [String] = []
+      for p in parados where folga < 2_147_483_648 {
+        let antes = p.memoria > 0 ? p.memoria : 400 * 1_048_576
+        if p.hibernar() {
+          liberados += 1; folga += antes; memoriaPaineis -= min(memoriaPaineis, p.memoria)
+          nomes.append(p.persona?.nome ?? p.apelido)
+        }
+      }
+      if !nomes.isEmpty {
+        avisoRapido("Pouca memória no Mac: \(nomes.joined(separator: ", ")) hibern\(nomes.count == 1 ? "ou" : "aram") — volta\(nomes.count == 1 ? "" : "m") na mesma conversa ao abrir", segundos: 6)
+      }
+    }
+    if liberados > 0 { Memoria.aliviar() }
+  }
+
+  /// "Hibernar agora" (menu, paleta, CLI): avisa o motivo quando não dá.
+  func hibernarAgora(_ p: Painel) {
+    if let motivo = p.impedimentoHibernar(minimo: 0) { avisar("Não dá para hibernar agora", "\(p.persona?.nome ?? "Este agente") \(motivo)."); return }
+    if !p.hibernar() { avisar("Não dá para hibernar agora", "Não achei o id da conversa para retomar depois.") }
   }
 
   /// Memória do app e de cada painel, a cada ~4 s e só com a janela à vista. A passada pela
@@ -754,7 +883,11 @@ final class Loja {
 
   func parouDeTrabalhar(_ p: Painel, durou: TimeInterval) {
     if durou > 2 { entregarAoPai(p) }
-    guard ajustes.avisarAgentes, let ag = p.agente, durou > 5, !estaVendo(p) else { return }
+    guard ajustes.avisarAgentes, let ag = p.agente, durou > 5 || p.permissao != nil, !estaVendo(p) else { return }
+    if let perm = p.permissao {
+      notificar(p, titulo: "\(p.persona?.nome ?? nomeFerramenta(ag)) pede permissão", corpo: perm.pergunta + (perm.detalhe.isEmpty ? "" : " — " + perm.detalhe.prefix(100)))
+      return
+    }
     notificar(p, titulo: "\(p.persona?.nome ?? nomeFerramenta(ag)) parou — aguardando você",
               corpo: "\(p.aba.map(titulo) ?? "") · \(Loja.encurtar(p.cwd)) · \(Int(durou)) s de trabalho")
   }
@@ -846,7 +979,7 @@ final class Loja {
       "versao": 3,
       "workspaceAtivo": workspaceAtivoID ?? "",
       "workspaces": workspaces.map { w -> [String: Any] in
-        ["id": w.id, "nome": w.nome, "cor": w.cor, "simbolo": w.simbolo, "pasta": w.pasta, "abaAtiva": w.abaAtiva ?? ""]
+        ["id": w.id, "nome": w.nome, "cor": w.cor, "simbolo": w.simbolo, "pasta": w.pasta, "abaAtiva": w.abaAtiva ?? "", "setores": w.setores]
       },
       "abas": abas.map { a -> [String: Any] in
         var d: [String: Any] = ["id": a.id, "workspace": a.workspace, "kind": a.kind, "contaClaude": a.conta("claude"),
@@ -854,6 +987,7 @@ final class Loja {
                                 "arvore": a.arvore.dicionario(painel: { self.paineis[$0] })]
         if let t = a.titulo { d["titulo"] = t }
         if let c = a.cor { d["cor"] = c }
+        if let st = a.setor { d["setor"] = st }
         return d
       },
     ]
@@ -869,6 +1003,7 @@ final class Loja {
                         cor: g["cor"] as? String ?? Cor.paletaGrupos[0], simbolo: g["simbolo"] as? String ?? "folder",
                         pasta: g["pasta"] as? String ?? NSHomeDirectory())
       if let a = g["abaAtiva"] as? String, !a.isEmpty { w.abaAtiva = a }
+      w.setores = g["setores"] as? [String] ?? []
       return w
     }
     if workspaces.isEmpty { workspaces = [Workspace(id: "w-geral", nome: "Geral", cor: Cor.paletaGrupos[0], simbolo: "house")] }
@@ -883,6 +1018,7 @@ final class Loja {
                            "gemini": ad["contaGemini"] as? String ?? ajustes.contaGemini])
       a.titulo = ad["titulo"] as? String
       a.cor = ad["cor"] as? String
+      a.setor = (ad["setor"] as? String).flatMap { st in workspace(a.workspace)?.setores.contains(st) == true ? st : nil }
       if let pa = ad["painelAtivo"] as? String, arvore.folha(pa) != nil { a.painelAtivo = pa }
       abas.append(a)
     }
@@ -960,5 +1096,24 @@ enum Migracao {
               "simbolo": nome.lowercased() == "geral" ? "house" : "folder", "pasta": pasta, "abaAtiva": abaAtiva]
     }
     return ["versao": 3, "workspaceAtivo": wsAtivo, "workspaces": workspaces, "abas": novasAbas]
+  }
+}
+
+extension Loja {
+  /// Mostra um aviso curto embaixo da janela por ~1,4 s (ou `segundos`). Não bloqueia nada —
+  /// é o certo para o que acontece em segundo plano (um diálogo seguraria a caixa de entrada).
+  func avisoRapido(_ texto: String, segundos: Double = 1.4) {
+    let n = (aviso?.id ?? 0) + 1
+    aviso = (n, texto)
+    DispatchQueue.main.asyncAfter(deadline: .now() + segundos) { [weak self] in
+      MainActor.assumeIsolated { if self?.aviso?.id == n { self?.aviso = nil } }
+    }
+  }
+
+  /// Copia um texto e avisa.
+  func copiar(_ texto: String, aviso rotulo: String = "Copiado") {
+    guard !texto.isEmpty else { avisoRapido("Nada para copiar"); return }
+    MenuTerminal.copiar(texto)
+    avisoRapido(rotulo)
   }
 }

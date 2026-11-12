@@ -18,6 +18,8 @@ struct Ajustes: Codable, Equatable {
   var cursor = "barra"               // barra | bloco | sublinhado
   var gpu = true                     // renderização Metal
   var margem: Double = 10
+  var tamanhoMascote: Double = 1.15   // escala dos mascotes dos agentes (barra lateral, chat, quadro)
+  var mascotesAnimados = true         // piscam, olham em volta e respiram (só com o app na frente)
   // Terminal
   var shell = ""
   var novaAbaNaPastaAtual = true
@@ -30,6 +32,9 @@ struct Ajustes: Codable, Equatable {
   // Abas
   var restaurar = true
   var retomarAgentes = true
+  /// Minutos parado (esperando você, fora da tela) até o agente hibernar: o processo fecha e a
+  /// conversa volta com --resume quando você abre ou manda mensagem. 0 = nunca.
+  var hibernarMinutos: Double = 30
   var confirmarFechar = true
   var barraLateral = true
   var larguraLateral: Double = 248
@@ -76,12 +81,15 @@ struct Ajustes: Codable, Equatable {
     escalaUI = min(1.4, max(0.85, v(.escalaUI, p.escalaUI))); raio = min(22, max(4, v(.raio, p.raio))); sombras = v(.sombras, p.sombras)
     opacidade = v(.opacidade, p.opacidade); desfoque = v(.desfoque, p.desfoque); vidroPuro = v(.vidroPuro, p.vidroPuro)
     cursor = v(.cursor, p.cursor); gpu = v(.gpu, p.gpu); margem = v(.margem, p.margem)
+    tamanhoMascote = min(1.5, max(0.8, v(.tamanhoMascote, p.tamanhoMascote)))
+    mascotesAnimados = v(.mascotesAnimados, p.mascotesAnimados)
     shell = v(.shell, p.shell); novaAbaNaPastaAtual = v(.novaAbaNaPastaAtual, p.novaAbaNaPastaAtual)
     rolagem = v(.rolagem, p.rolagem); optionMeta = v(.optionMeta, p.optionMeta)
     copiarAoSelecionar = v(.copiarAoSelecionar, p.copiarAoSelecionar)
     comandoClaude = v(.comandoClaude, p.comandoClaude); comandoCodex = v(.comandoCodex, p.comandoCodex)
     comandoGemini = v(.comandoGemini, p.comandoGemini); contaGemini = v(.contaGemini, p.contaGemini)
     restaurar = v(.restaurar, p.restaurar); retomarAgentes = v(.retomarAgentes, p.retomarAgentes)
+    hibernarMinutos = max(0, v(.hibernarMinutos, p.hibernarMinutos))
     confirmarFechar = v(.confirmarFechar, p.confirmarFechar); barraLateral = v(.barraLateral, p.barraLateral)
     larguraLateral = v(.larguraLateral, p.larguraLateral)
     compose = v(.compose, p.compose)

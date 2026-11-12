@@ -206,6 +206,8 @@ struct Tema: Identifiable, Equatable, Codable {
   @ObservationIgnored var escala: CGFloat = 1
   @ObservationIgnored var raio: CGFloat = 14
   @ObservationIgnored var sombras = true
+  @ObservationIgnored var mascote: CGFloat = 1.15
+  @ObservationIgnored var animarMascotes = true
 }
 
 extension NSColor {
@@ -252,6 +254,8 @@ enum Cor {
   /// Texto sobre um botão preenchido com o destaque.
   static var sobreAcento: SwiftUI.Color { t.corAcento.luminancia > 0.6 ? .black.opacity(0.85) : .white }
   static var texto: SwiftUI.Color { tinta(0.92, 0.88) }
+  /// Texto sobre um botão preenchido com a tinta (`texto`): a ação principal é em tinta, não em cor.
+  static var sobreTinta: SwiftUI.Color { t.claro ? .white : .black }
   static var texto2: SwiftUI.Color { tinta(0.64, 0.66) }
   static var texto3: SwiftUI.Color { tinta(0.42, 0.48) }
   static var texto4: SwiftUI.Color { tinta(0.26, 0.32) }

@@ -161,6 +161,24 @@ extension Painel {
     return nil
   }
 
+  /// Último comando (opcional) e a saída dele, capturados pelas marcas OSC 133.
+  func textoDoUltimoResultado(comComando: Bool) -> String {
+    guard let r = ultimoResultado else { return "" }
+    let saida = r.saida.trimmingCharacters(in: .newlines)
+    return comComando && !r.comando.isEmpty ? "$ \(r.comando)\n\(saida)" : saida
+  }
+
+  /// A última coisa que o agente escreveu (o último balão dele na vista de conversa).
+  func ultimaResposta() -> String? {
+    baloesConversa().last { !$0.meu && !$0.texto.isEmpty }?.texto
+  }
+
+  /// ⇧⌘C: o resultado mais útil para colar em outro lugar.
+  func copiarUltimoResultado() {
+    if tipoAgente != nil { loja.copiar(ultimaResposta() ?? "", aviso: "Resposta copiada") }
+    else { loja.copiar(textoDoUltimoResultado(comComando: true), aviso: "Comando e saída copiados") }
+  }
+
   /// ⌘-clique: abre o link no navegador, o arquivo no app padrão, a pasta no Finder.
   func abrir(_ a: Alvo) {
     guard let u = a.url else { return }
@@ -239,7 +257,40 @@ enum MenuTerminal {
     }
 
     let selecao = p.view?.selectionActive == true ? p.view?.getSelection() : nil
-    item("Copiar", "doc.on.doc", ligado: selecao?.isEmpty == false) { if let s = selecao { copiar(s) } }
+    item("Copiar", "doc.on.doc", ligado: selecao?.isEmpty == false) { if let s = selecao { loja.copiar(s) } }
+    // Mais formas de copiar, sem precisar selecionar com o mouse.
+    let sub = NSMenu()
+    sub.autoenablesItems = false
+    func itemSub(_ titulo: String, _ simbolo: String, ligado: Bool = true, _ acao: @escaping () -> Void) {
+      let alvoItem = AcaoDeMenu(acao)
+      let i = NSMenuItem(title: titulo, action: #selector(AcaoDeMenu.disparar(_:)), keyEquivalent: "")
+      i.target = alvoItem; i.representedObject = alvoItem; i.isEnabled = ligado
+      i.image = NSImage(systemSymbolName: simbolo, accessibilityDescription: nil)
+      sub.addItem(i)
+    }
+    if let s = selecao, !s.isEmpty {
+      itemSub("Seleção como bloco de código", "chevron.left.forwardslash.chevron.right") { loja.copiar("```\n\(s)\n```") }
+      itemSub("Seleção numa linha só", "arrow.left.and.right.text.vertical") {
+        loja.copiar(s.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " "))
+      }
+      sub.addItem(.separator())
+    }
+    if p.tipoAgente != nil {
+      let resposta = p.ultimaResposta()
+      itemSub("Última resposta do agente  ⇧⌘C", "text.bubble", ligado: resposta != nil) { loja.copiar(resposta ?? "") }
+    } else {
+      let r = p.ultimoResultado
+      itemSub("Último comando e a saída  ⇧⌘C", "terminal", ligado: r != nil) { loja.copiar(p.textoDoUltimoResultado(comComando: true)) }
+      itemSub("Só a saída do último comando", "text.alignleft", ligado: r != nil) { loja.copiar(p.textoDoUltimoResultado(comComando: false)) }
+      itemSub("Só o último comando", "chevron.right", ligado: r?.comando.isEmpty == false) { loja.copiar(r?.comando ?? "") }
+    }
+    itemSub("Tela visível", "rectangle.dashed") { loja.copiar(p.texto(linhas: 0)) }
+    itemSub("Tudo (histórico inteiro)", "doc.plaintext") { loja.copiar(p.texto(linhas: nil)) }
+    itemSub("Pasta atual", "folder") { loja.copiar(p.cwd) }
+    let raiz = NSMenuItem(title: "Copiar…", action: nil, keyEquivalent: "")
+    raiz.image = NSImage(systemSymbolName: "doc.on.doc.fill", accessibilityDescription: nil)
+    raiz.submenu = sub
+    m.addItem(raiz)
     item("Colar", "doc.on.clipboard", ligado: NSPasteboard.general.string(forType: .string) != nil) { if let v = p.view { v.paste(v) } }
     if let s = selecao, !s.isEmpty {
       item("Levar a seleção para o compose", "text.insert") { p.inserirNoCompose(s + " "); p.focarCompose() }

@@ -53,7 +53,12 @@ enum Shell {
       env["ORION_ZDOTDIR_USUARIO"] = usuario
       env["ZDOTDIR"] = Armazem.pastaZsh.path
     }
-    if let c = comando, !c.isEmpty {
+    if var c = comando, !c.isEmpty {
+      // Só na cópia de desenvolvimento (ORION_DADOS): ORION_BIN_FALSO põe uma pasta na frente do
+      // PATH depois do .zshrc, para prints e testes rodarem agentes de mentira sem gastar conta.
+      if Armazem.desenvolvimento, let falso = ProcessInfo.processInfo.environment["ORION_BIN_FALSO"], !falso.isEmpty {
+        c = "export PATH='\(falso)':$PATH; \(c)"
+      }
       if nome == "zsh" {
         env["ORION_RUN"] = c   // roda no primeiro prompt; ao sair, o shell continua aberto
       } else {

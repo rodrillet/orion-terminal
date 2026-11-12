@@ -307,9 +307,21 @@ final class Delegado: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserN
     }
     // Cliques num terminal: foca o painel; ⌘-clique abre o caminho ou o link sob o mouse;
     // o botão direito abre o menu do app.
-    monitorCliques = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] e in
-      guard let self, e.window === self.janela, self.loja.dialogo == nil,
-            let alvo = self.janela.contentView?.hitTest(e.locationInWindow) else { return e }
+    monitorCliques = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .leftMouseUp]) { [weak self] e in
+      guard let self, e.window === self.janela, self.loja.dialogo == nil else { return e }
+      // Copiar ao selecionar: quando o arrasto de seleção termina, o texto vai para a área de transferência.
+      if e.type == .leftMouseUp {
+        if self.loja.ajustes.copiarAoSelecionar, let tv = self.janela.firstResponder as? TerminalView, tv.selectionActive {
+          DispatchQueue.main.async {
+            if let s = tv.getSelection(), !s.isEmpty, NSPasteboard.general.string(forType: .string) != s {
+              MenuTerminal.copiar(s)
+              self.loja.avisoRapido("Copiado")
+            }
+          }
+        }
+        return e
+      }
+      guard let alvo = self.janela.contentView?.hitTest(e.locationInWindow) else { return e }
       var v: NSView? = alvo
       var noTerminal = false
       while let x = v, !(x is CaixaPainel) { if x is TerminalView { noTerminal = true }; v = x.superview }
@@ -405,8 +417,10 @@ final class Delegado: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserN
     case "novoClaude": loja.criarAba(kind: "claude")
     case "novoCodex": loja.criarAba(kind: "codex")
     case "novoGemini": loja.criarAba(kind: "gemini")
+    case "proximoEsperando": loja.irParaProximoEsperando()
     case "reabrir": if let f = loja.fechados.first { loja.reabrir(f) } else { loja.avisar("Nada para reabrir", "Nenhum agente foi fechado há pouco.") }
     case "conversa": if let p, p.tipoAgente != nil { p.conversa.toggle() }
+    case "copiarResultado": p?.copiarUltimoResultado()
     case "subagente": if let p, let t = p.tipoAgente { loja.novoAgentePerguntando(kind: t, pai: p.id) }
     case "portas": loja.atualizarPortas(); loja.paletaAberta = false; loja.pedirPortas += 1
     case "novoWorkspace": loja.novoWorkspacePerguntando()
@@ -504,7 +518,8 @@ final class Delegado: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserN
     let proximo = sistema("Buscar próximo", #selector(NSTextView.performFindPanelAction(_:)), "g")
     proximo.tag = Int(NSFindPanelAction.next.rawValue)
     submenu("Editar", [
-      sistema("Copiar", #selector(NSText.copy(_:)), "c"), sistema("Colar", #selector(NSText.paste(_:)), "v"),
+      sistema("Copiar", #selector(NSText.copy(_:)), "c"), item("Copiar o último resultado", "copiarResultado", "c", [.command, .shift]),
+      sistema("Colar", #selector(NSText.paste(_:)), "v"),
       sistema("Selecionar tudo", #selector(NSText.selectAll(_:)), "a"), .separator(),
       buscar, proximo, item("Limpar", "limpar", "k"), .separator(),
       item("Paleta de comandos", "paleta", "p"),
@@ -520,6 +535,7 @@ final class Delegado: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserN
     let cima = String(UnicodeScalar(NSUpArrowFunctionKey)!), baixo = String(UnicodeScalar(NSDownArrowFunctionKey)!)
     var itensWs: [NSMenuItem] = [
       item("Quadro de agentes", "quadro", "a", [.command, .shift]),
+      item("Próximo agente esperando você", "proximoEsperando", "j"),
       item("Interromper o agente", "interromper", ".", [.command]),
       item("Atualizar o uso das contas", "atualizarUso", "u", [.command, .option]), .separator(),
       item("Novo workspace…", "novoWorkspace", "g", [.command, .shift]),

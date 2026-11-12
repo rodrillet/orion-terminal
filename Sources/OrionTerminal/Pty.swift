@@ -12,6 +12,10 @@ final class Sessao {
   private let filaLeitura: DispatchQueue
   private let filaEscrita: DispatchQueue
   private(set) var encerrada = false
+  /// Enquanto morre, a sessão segura a si mesma: quem a matou já soltou a referência, e sem isto
+  /// o aviso de saída (waitpid + close do pty) nunca rodava — cada aba fechada deixava um fd de
+  /// pty aberto e um processo zumbi.
+  private var morrendo: Sessao?
   var aoSair: ((Int32) -> Void)?
   /// Chamado na fila de leitura com cada bloco lido.
   var aoReceber: ((ArraySlice<UInt8>) -> Void)?
@@ -107,20 +111,31 @@ final class Sessao {
     _ = ioctl(fd, TIOCSWINSZ, &ws)
   }
 
-  /// Fecha a aba: SIGHUP no grupo do shell (como o Terminal faz), SIGKILL se não sair.
+  /// Fecha a aba: SIGHUP no grupo do shell (como o Terminal faz) e no grupo do que está em
+  /// primeiro plano (o agente roda num grupo próprio), SIGKILL se não sair.
   func matar() {
     guard !encerrada, pid > 0 else { return }
+    morrendo = self
     let p = pid
+    let g = fd >= 0 ? tcgetpgrp(fd) : -1
+    if g > 0 && g != p { kill(-g, SIGHUP) }
     kill(-p, SIGHUP); kill(p, SIGHUP)
-    DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { kill(-p, SIGKILL); kill(p, SIGKILL) }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
+      if g > 0 && g != p { kill(-g, SIGKILL) }
+      kill(-p, SIGKILL); kill(p, SIGKILL)
+    }
+    // Rede de segurança: se o aviso de saída não vier, solta e fecha mesmo assim.
+    filaLeitura.asyncAfter(deadline: .now() + 5) { [weak self] in self?.encerrar() }
   }
 
   private func encerrar() {
-    if encerrada { return }
+    if encerrada { morrendo = nil; return }
     encerrada = true
     leitura?.cancel()
     fim?.cancel()
     if fd >= 0 { close(fd); fd = -1 }
+    if pid > 0 { var st: Int32 = 0; waitpid(pid, &st, WNOHANG) }
+    morrendo = nil
   }
 
   // MARK: - O que está rodando

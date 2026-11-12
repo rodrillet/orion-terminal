@@ -18,7 +18,8 @@ struct CabecalhoPainel: View {
     HStack(alignment: .center, spacing: medio ? 10 : 7) {
       Group {
         if let persona = painel.persona, let t = painel.tipoAgente {
-          AvatarPersona(persona: persona, tamanho: F.m(medio ? 30 : 24), ferramenta: t, maestro: loja.ehMaestro(painel))
+          AvatarPersona(persona: persona, tamanho: F.m(medio ? 30 : 24), ferramenta: t, estado: painel.estado, maestro: loja.ehMaestro(painel),
+                        pontoEstado: false)
             .onTapGesture(count: 2) { loja.editarPersonagem(painel) }
             .help("\(persona.nome)\(persona.papel.isEmpty ? "" : " · \(persona.papel)") — \(nomeLongoFerramenta(t)). Duplo clique edita o personagem.")
         } else {
@@ -42,7 +43,7 @@ struct CabecalhoPainel: View {
             }
             if medio {
               if painel.tipoAgente != nil {
-                BotaoMini(painel.conversa ? "terminal" : "bubble.left.and.bubble.right", painel.conversa ? "Voltar ao terminal  ⌥⌘C" : "Ver como conversa (as mensagens do compose e as respostas)  ⌥⌘C") { painel.conversa.toggle() }
+                BotaoMini(painel.conversa ? "terminal" : "text.bubble", painel.conversa ? "Voltar ao terminal  ⌥⌘C" : "Ver como conversa (as mensagens do compose e as respostas)  ⌥⌘C") { painel.conversa.toggle() }
               }
               BotaoMini(painel.composeVisivel ? "square.and.pencil.circle.fill" : "square.and.pencil", "Escrever no compose  ⌘E   ·   mostrar/esconder  ⇧⌘E") { painel.alternarCompose() }
             }

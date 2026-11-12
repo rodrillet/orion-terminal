@@ -20,6 +20,7 @@ final class No {
   var tarefa: String?       // a tarefa em poucas palavras (da primeira mensagem)
   var sessao: String?       // id da conversa na ferramenta (para retomar exatamente ela)
   var retorno = false       // ao parar, entrega o resultado ao pai
+  var pr: String?           // link do último pull request que o agente abriu
   // divisão
   var horizontal: Bool      // true = lado a lado
   var proporcao: Double
@@ -60,6 +61,7 @@ final class No {
       if let tarefa { d["tarefa"] = tarefa }
       if let sessao { d["sessao"] = sessao }
       if retorno { d["retorno"] = true }
+      if let pr { d["pr"] = pr }
       return d
     }
     return ["tipo": "divisao", "horizontal": horizontal, "proporcao": proporcao,
@@ -82,6 +84,7 @@ final class No {
     n.tarefa = d["tarefa"] as? String
     n.sessao = d["sessao"] as? String
     n.retorno = d["retorno"] as? Bool ?? false
+    n.pr = d["pr"] as? String
     return n
   }
 }
@@ -95,6 +98,8 @@ final class No {
   var simbolo: String
   var pasta: String
   var abaAtiva: String?     // última aba vista neste workspace
+  /// Setores (grupos de agentes) deste workspace, na ordem da barra lateral.
+  var setores: [String] = []
 
   init(id: String = "w-" + UUID().uuidString.prefix(8).lowercased(), nome: String, cor: String,
        simbolo: String = "folder", pasta: String = NSHomeDirectory()) {
@@ -112,6 +117,8 @@ final class No {
   var titulo: String?
   var kind: String
   var cor: String?
+  /// Setor do agente desta aba (um nome de `Workspace.setores`); nil = sem setor.
+  var setor: String?
   /// Conta de cada ferramenta nesta aba (ferramenta → id da conta).
   var contas: [String: String]
   @ObservationIgnored var arvore: No

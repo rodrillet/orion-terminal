@@ -40,6 +40,9 @@ final class Painel: TerminalViewDelegate {
   var previa = ""
   /// Marca do quadro feita à mão ("revisar" | "concluido"); some quando o agente volta a trabalhar.
   var marca: String?
+  /// Último pull request que o agente abriu (link); move o cartão para "revisar".
+  var pr: String? { didSet { no.pr = pr } }
+  @ObservationIgnored var prVistoEm = Date.distantPast
   /// Memória do shell deste painel e de tudo o que ele abriu (bytes), e quantos processos são.
   var memoria: UInt64 = 0
   var processos = 0
@@ -54,6 +57,15 @@ final class Painel: TerminalViewDelegate {
   var conversa = false { didSet { if conversa != oldValue { caixa?.atualizarConversa() } } }
   /// Portas TCP em escuta abertas por este painel (servidores que ele subiu).
   var portas: [Int] = []
+  /// Hibernado: o processo do agente foi encerrado para liberar memória; a conversa volta com
+  /// `--resume` (comando em `comandoRetomar`) quando o painel aparece ou recebe mensagem.
+  var hibernado = false
+  @ObservationIgnored var comandoRetomar: String?
+  @ObservationIgnored var hibernouEm: Date?
+  /// O agente parou perguntando algo com opções (permissão para rodar um comando, editar…).
+  var permissao: Permissao?
+  @ObservationIgnored var leituraPermissao = Date.distantPast
+  @ObservationIgnored var permissaoRespondida: Permissao?
 
   @ObservationIgnored private(set) var view: TerminalView?
   @ObservationIgnored private(set) var caixa: CaixaPainel?
@@ -77,6 +89,11 @@ final class Painel: TerminalViewDelegate {
   @ObservationIgnored var alturaCompose: CGFloat = 0 { didSet { if alturaCompose != oldValue { caixa?.needsLayout = true } } }
   /// Mensagens mandadas pelo compose, com a linha do terminal em que cada uma entrou (para a conversa).
   @ObservationIgnored var enviadas: [Conversa.Enviada] = []
+  /// Linha do terminal a partir da qual a conversa é mostrada ("Limpar conversa").
+  @ObservationIgnored var inicioConversa: Int?
+  @ObservationIgnored var inicioConversaEm: Date?
+  /// Leitura incremental do arquivo de sessão do Claude/Codex (o chat limpo).
+  @ObservationIgnored lazy var leitorSessao = LeitorSessao()
   @ObservationIgnored var iniciadoEm = Date()
   @ObservationIgnored private var pidNomeado: pid_t = -1
 
@@ -88,6 +105,7 @@ final class Painel: TerminalViewDelegate {
     self.cwd = no.cwd
     self.zoom = no.zoom
     self.marca = no.marca
+    self.pr = no.pr
     self.persona = no.persona
     self.pai = no.pai
     self.maestro = no.maestro
@@ -134,7 +152,7 @@ final class Painel: TerminalViewDelegate {
   }
 
   func lerPrevia() {
-    guard let texto = baloes().last(where: { !$0.meu })?.texto else { return }
+    guard let texto = baloes(ultimas: 150).last(where: { !$0.meu })?.texto else { return }
     let linha = texto.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
       .last { $0.count > 3 && !$0.allSatisfy { "─━═-_>❯⏵·•*│ ".contains($0) } } ?? ""
     let curta = String(linha.prefix(160))
@@ -305,6 +323,14 @@ final class Painel: TerminalViewDelegate {
 
   func iniciar(comando forcado: String? = nil) {
     guard let v = view else { return }
+    var forcado = forcado
+    if hibernado {
+      // Volta da hibernação: tela limpa e a mesma conversa (--resume <id>).
+      hibernado = false
+      forcado = forcado ?? comandoRetomar
+      comandoRetomar = nil
+      v.resetToInitialState()
+    }
     iniciado = true
     iniciadoEm = Date()
     vivo = true
@@ -312,7 +338,16 @@ final class Painel: TerminalViewDelegate {
     let dim = v.terminalInputStateSnapshot()?.dimensions
     let s = Sessao(id: id)
     let env = loja.ambiente(aba: aba)
-    let comando = forcado ?? no.comando
+    var comando = forcado ?? no.comando
+    // Claude novo (não retomado): o id da conversa é decidido aqui (--session-id), então
+    // retomar, hibernar e reabrir voltam sempre na conversa certa — adivinhar pelo arquivo mais
+    // recente errava quando vários agentes trabalham na mesma pasta.
+    if no.kind == "claude", let c = comando, let base = loja.comandoDoTipo("claude"), c == base || c.hasPrefix(base + " "),
+       !c.contains("--resume"), !c.contains("--continue"), !c.contains("--session-id"), !c.contains(" -r "), !c.contains(" -c ") {
+      let uuid = UUID().uuidString.lowercased()
+      comando = base + " --session-id " + uuid + c.dropFirst(base.count)
+      no.sessao = uuid
+    }
     no.comando = (no.kind == "shell") ? nil : loja.comandoDoTipo(no.kind)   // retomar só na primeira vez
     let lancamento = Shell.preparar(shell: loja.ajustes.shell.isEmpty ? nil : loja.ajustes.shell,
                                     comando: comando, extra: env, idAba: id)
@@ -336,6 +371,70 @@ final class Painel: TerminalViewDelegate {
     atualizarEstado()
   }
 
+  // MARK: - Conversa (id da sessão)
+
+  /// Id da conversa deste agente: o que foi fixado ao abrir (--session-id) quando o arquivo
+  /// existe; senão o arquivo mais provável, sem pegar o de outro painel.
+  func idDaConversa() -> String? {
+    guard let tipo = tipoAgente, let a = aba else { return no.sessao }
+    let config = loja.conta(a.conta(tipo))?.dir
+    if tipo == "claude", let s = no.sessao,
+       FileManager.default.fileExists(atPath: Sessoes.pastaDoClaude(config: config, cwd: cwd).appendingPathComponent(s + ".jsonl").path) {
+      return s
+    }
+    let dosOutros = Set(loja.paineis.values.filter { $0 !== self }.compactMap { $0.no.sessao })
+    return Sessoes.descobrir(tipo: tipo, config: config, cwd: cwd, desde: iniciadoEm, atividade: leitor.ultimaSaida, excluir: dosOutros) ?? no.sessao
+  }
+
+  // MARK: - Hibernar
+
+  /// Por que este agente não pode hibernar agora (nil = pode). `minimo` = segundos parado.
+  func impedimentoHibernar(minimo: TimeInterval) -> String? {
+    guard vivo, let ag = agente, tipo != "shell", Ferramenta.de(ag) != nil else { return "não é um agente aberto como agente" }
+    guard ag != "gemini" else { return "o Gemini CLI não retoma uma conversa pelo id" }
+    guard estado == .esperando, permissao == nil else { return "não está parado esperando você" }
+    if Date().timeIntervalSince(max(desde, ultimaEntrada, leitor.ultimaSaida)) < minimo { return "parado há pouco tempo" }
+    if !portas.isEmpty { return "tem servidor rodando (porta \(portas.map(String.init).joined(separator: ", ")))" }
+    if loja.naFila(para: id) > 0 { return "tem mensagem na fila" }
+    if !rascunho.texto.isEmpty || !rascunho.anexos.isEmpty { return "tem rascunho no compose" }
+    if let s = sessao, let p = s.pidAtivo(),
+       Memoria.descendentes(p).contains(where: { ["zsh", "bash", "sh", "fish", "dash"].contains($0) }) {
+      return "tem comando rodando"
+    }
+    return nil
+  }
+
+  /// Encerra o processo do agente e guarda como retomar a conversa. Devolve false se não deu
+  /// (sem id de sessão não hiberna: "--continue" poderia abrir a conversa de outro agente da pasta).
+  @discardableResult
+  func hibernar() -> Bool {
+    guard let ag = agente, let fer = Ferramenta.de(ag), let base = loja.comandoDoTipo(ag), let a = aba else { return false }
+    _ = a
+    guard let id = idDaConversa() else { return false }
+    no.sessao = id
+    let retomar = fer.retomar(base, sessao: id)
+    comandoRetomar = retomar
+    no.comando = retomar            // se o app fechar com ele hibernado, a restauração retoma igual
+    lerPrevia()
+    // O agente primeiro (SIGTERM para ele gravar o que falta), depois o shell.
+    if let s = sessao, let g = s.pidAtivo(), g != s.pid { kill(-g, SIGTERM) }
+    envioTamanho?.cancel()
+    sessao?.aoSair = nil
+    let s = sessao
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { s?.matar() }
+    sessao = nil
+    vivo = false
+    iniciado = false
+    ocupado = false
+    progresso = nil
+    hibernado = true
+    hibernouEm = Date()
+    memoria = 0; processos = 0
+    atualizarEstado()
+    loja.salvarDepois()
+    return true
+  }
+
   func reiniciar(comando: String? = nil) {
     sessao?.aoSair = nil
     sessao?.matar()
@@ -355,7 +454,15 @@ final class Painel: TerminalViewDelegate {
     sessao?.matar()
     sessao = nil
     vivo = false
+    // Painel e caixa se seguram um ao outro (e as views SwiftUI de dentro seguram o painel):
+    // sem desmontar, o terminal inteiro — scrollback, camadas Metal, leitor da sessão, o relógio
+    // do chat — ficava na memória depois de fechar a aba.
+    caixa?.desmontar()
     caixa?.removeFromSuperview()
+    caixa = nil
+    view?.terminalDelegate = nil
+    view = nil
+    leitor.aoEvento = nil
   }
 
   private func saiu(_ codigo: Int32) {
@@ -389,7 +496,11 @@ final class Painel: TerminalViewDelegate {
     if ativo && !estava { inicioAtividade = ultima }
     if ativo != estava {
       ocupado = ativo
-      if !ativo { loja.parouDeTrabalhar(self, durou: ultima.timeIntervalSince(inicioAtividade)) }
+      if ativo { if permissao != nil { permissao = nil }; permissaoRespondida = nil }
+      else { leituraPermissao = ultima; lerPermissao(); loja.parouDeTrabalhar(self, durou: ultima.timeIntervalSince(inicioAtividade)) }
+    } else if !ativo, ultima > leituraPermissao, agora.timeIntervalSince(ultima) > 0.5 {
+      leituraPermissao = ultima      // saída nova com ele parado (a tela da pergunta mudou)
+      lerPermissao()
     }
     atualizarEstado()
   }
@@ -698,6 +809,15 @@ final class LeitorSaida {
 /// e da janela.
 final class CaixaPainel: NSView {
   let painel: Painel
+
+  /// Fechando o painel: para o relógio do chat e solta as views que seguram o painel.
+  func desmontar() {
+    estadoConversa?.parar()
+    estadoConversa = nil
+    for v in [conversa as NSView?, compose, mencoes, cabecalho] { v?.removeFromSuperview() }
+    conversa = nil; compose = nil; mencoes = nil
+    terminal.removeFromSuperview()
+  }
   let terminal: TerminalView
   let cabecalho: NSHostingView<CabecalhoPainel>
   /// Conteúdo recortado nos cantos arredondados (a sombra fica fora, na camada da própria caixa).
@@ -754,8 +874,15 @@ final class CaixaPainel: NSView {
 
   // MARK: Vista de conversa (por cima do terminal)
 
+  /// Relê o terminal e redesenha os balões agora (depois de limpar a conversa, por exemplo).
+  @MainActor func recarregarConversa() {
+    if let e = estadoConversa { e.atualizar(painel, forcar: true) }
+  }
+
   @MainActor func atualizarConversa() {
     if painel.conversa {
+      // Num chat, o campo de escrever fica sempre à vista.
+      if !painel.composeVisivel { painel.rascunho.manual = true; painel.atualizarCompose() }
       if conversa == nil {
         let e = EstadoConversa()
         let v = NSHostingView(rootView: ConversaView(painel: painel, estado: e))
@@ -880,6 +1007,8 @@ final class CaixaPainel: NSView {
     if !painel.iniciado && bounds.width > 50 {
       DispatchQueue.main.async { [weak self] in
         guard let self, !self.painel.iniciado, self.window != nil else { return }
+        // Hibernado só acorda quando aparece de verdade (aba ativa e janela à vista).
+        if self.painel.hibernado && (self.isHiddenOrHasHiddenAncestor || self.painel.aba?.id != self.painel.loja.abaAtivaID) { return }
         self.painel.iniciar()
       }
     }

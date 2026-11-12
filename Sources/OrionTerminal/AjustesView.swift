@@ -180,6 +180,14 @@ struct AjustesView: View {
     it.append(ItemAjuste("escalaUI", "aparencia", "Interface", "textformat.size", "Tamanho da letra", dica: "Menus, barras e cartões (não o terminal)", palavras: "fonte interface zoom ui") {
       Deslizante(valor: a.escalaUI, faixa: 0.85...1.4, passo: 0.05) { "\(Int(($0 * 100).rounded()))%" }
     })
+    it.append(ItemAjuste("tamanhoMascote", "aparencia", "Interface", "face.smiling", "Tamanho dos mascotes", dica: "Agentes na barra lateral, no chat e no quadro", palavras: "pet avatar personagem mascote tamanho") {
+      Escolha(valor: Binding(get: { String(format: "%.2f", loja.ajustes.tamanhoMascote) }, set: { loja.ajustes.tamanhoMascote = Double($0) ?? 1.15 }),
+              opcoes: [("0.90", "Pequeno", nil), ("1.15", "Médio", nil), ("1.35", "Grande", nil)])
+    })
+    it.append(ItemAjuste("mascotesAnimados", "aparencia", "Interface", "sparkles", "Mascotes animados",
+                         dica: "Piscam, olham em volta e respiram — só com o app na frente", palavras: "animação mascote piscar movimento cpu") {
+      Chave(a.mascotesAnimados)
+    })
     it.append(ItemAjuste("raio", "aparencia", "Interface", "app", "Cantos", palavras: "arredondamento raio quadrado") {
       Deslizante(valor: a.raio, faixa: 4...22, passo: 1) { "\(Int($0)) px" }
     })
@@ -229,6 +237,12 @@ struct AjustesView: View {
       Escolha(valor: a.cliqueFerramenta, opcoes: [("painel", "Abre o painel", "rectangle.expand.vertical"), ("novo", "Abre um agente", "plus")])
     })
     it.append(ItemAjuste("retomar", "agentes", "Sessões", "arrow.uturn.backward", "Retomar a conversa", dica: "Ao reabrir o app ou um agente fechado", palavras: "continue resume sessão") { Chave(a.retomarAgentes) })
+    it.append(ItemAjuste("hibernar", "agentes", "Memória", "moon.zzz", "Hibernar agente parado após",
+                         dica: "Fora da tela, sem servidor nem comando rodando: o processo fecha e volta na mesma conversa ao abrir",
+                         palavras: "ram memória dormir suspender resume liberar") {
+      Escolha(valor: Binding(get: { String(Int(loja.ajustes.hibernarMinutos)) }, set: { loja.ajustes.hibernarMinutos = Double($0) ?? 30 }),
+              opcoes: [("0", "Nunca", nil), ("15", "15 min", nil), ("30", "30 min", nil), ("60", "1 h", nil), ("180", "3 h", nil)])
+    })
     it.append(ItemAjuste("restaurar", "agentes", "Sessões", "clock.arrow.circlepath", "Reabrir tudo ao abrir o app", palavras: "restaurar abas workspaces") { Chave(a.restaurar) })
     it.append(ItemAjuste("confirmar", "agentes", "Sessões", "hand.raised", "Confirmar antes de fechar algo rodando", palavras: "fechar confirmação") { Chave(a.confirmarFechar) })
     it.append(ItemAjuste("pastaAtual", "agentes", "Sessões", "folder", "Nova aba na pasta do painel atual", dica: "Desligado: na pasta do workspace", palavras: "pasta cwd nova aba") { Chave(a.novaAbaNaPastaAtual) })
@@ -259,6 +273,7 @@ struct AjustesView: View {
       Escolha(valor: Binding(get: { String(loja.ajustes.rolagem) }, set: { loja.ajustes.rolagem = Int($0) ?? 5000 }),
               opcoes: [("1000", "1 mil", nil), ("5000", "5 mil", nil), ("10000", "10 mil", nil), ("50000", "50 mil", nil)])
     })
+    it.append(ItemAjuste("copiarAoSelecionar", "terminal", "Teclado", "doc.on.doc", "Copiar ao selecionar", dica: "Selecionar com o mouse já copia (como no iTerm)", palavras: "copiar selecao clipboard area de transferencia") { Chave(a.copiarAoSelecionar) })
     it.append(ItemAjuste("optionMeta", "terminal", "Teclado", "option", "Option como Meta", dica: "⌥B / ⌥F andam por palavras", palavras: "alt meta") { Chave(a.optionMeta) })
     it.append(ItemAjuste("gpu", "terminal", "Desenho", "cpu", "Desenhar pela placa de vídeo", dica: "Mais fluido com muita saída", palavras: "gpu metal renderização") { Chave(a.gpu) })
     it.append(ItemAjuste("sugestoes", "terminal", "Autocomplete", "text.badge.plus", "Sugestões embaixo do que digito", dica: "⌃Espaço abre", palavras: "autocomplete completar") { Chave(a.sugestoes) })
@@ -708,6 +723,12 @@ struct ListaAtalhos: View {
 
 enum GuiaIA {
   static let exemplos = """
+  # Caixa de entrada: mande e encerre o turno — a resposta chega sozinha
+  orion equipe                           # quem é quem neste workspace (papel, setor, descrição, estado)
+  orion mandar @vega "revise o PR #12 e liste os problemas" --anexo tela.png
+  orion responder m-ab12cd "Status: pronto | Resultado: 3 problemas | Evidência: src/app.ts:40"
+  orion caixa                            # o que está na fila, entregue, respondido
+
   # Maestro: dispare subagentes, espere e recolha o resultado
   F1=$(orion agente --claude --pai $ORION_PAINEL --papel Dev --mensagem "implemente o formulário de leads")
   F2=$(orion agente --codex  --pai $ORION_PAINEL --papel Testes --mensagem "escreva os testes da API")
@@ -733,15 +754,28 @@ enum GuiaIA {
 
   Rodando dentro do Orion Terminal, `$ORION_PAINEL` é o id do seu próprio painel e o comando `orion` controla o app. O app é organizado em **workspaces** (um por projeto/cliente, com pasta própria); cada workspace tem abas, e cada aba tem um ou mais painéis (terminais ou agentes). Cada agente é um **personagem** (nome, papel, ferramenta: Claude Code, Codex ou Gemini CLI) e pode ser mencionado pelo nome (`@rigel`).
 
+  ### Caixa de entrada (falar com outros agentes)
+  Para pedir algo a outro agente, use a caixa — nunca digite direto no terminal dele nem fique esperando:
+  1. `orion equipe` mostra os colegas do workspace: `@apelido`, personagem, papel, setor, descrição e estado. Escolha pelo papel e pela descrição, e prefira quem está no seu setor; fora do seu papel, passe adiante em vez de recusar.
+  2. `orion mandar @apelido "pedido completo e autocontido" [--anexo ARQ]` põe a mensagem na caixa dele e devolve um id (`m-…`) na hora. Ela entra no terminal dele só quando ele estiver livre. Ele não vê a sua conversa: escreva o objetivo, o contexto, o que já foi tentado e como é o resultado pronto.
+  3. **Encerre o seu turno.** A resposta chega sozinha na sua conversa como `[Resposta de @apelido à mensagem m-…]`. Se ele parar sem responder, chega um aviso com o caminho da última resposta dele.
+  4. Ao receber `[Mensagem de @alguém · id m-…]`, faça o pedido e responda com `orion responder m-… "Status: … | Resultado: … | Evidência: …"` — depois encerre o turno.
+  5. `orion caixa` lista as suas mensagens (na fila, entregue, respondida); `orion cancelar m-…` tira da fila. `--sem-resposta` em `mandar` é para avisos que não pedem resposta.
+  6. Pediu para vários colegas? As respostas voltam **juntas**, numa entrega só, quando todos responderem (ou em 15 min). Não responda só "ok"/"obrigado": confirmações curtas ficam registradas mas não acordam ninguém. A mesma mensagem repetida para o mesmo colega em menos de 1 h não é enviada de novo.
+  7. Colega hibernado (dormindo para liberar memória) recebe normalmente: a mensagem o acorda na mesma conversa.
+  8. Não sabe quem do time deve pegar? `orion mandar @time "pedido" [--setor S]`: o Orion escolhe pelo papel, pela tarefa e por quem está livre. Recebeu `[Mensagem … para o time — o Orion escolheu você · id m-…]` e não é com você (ou não tem nada a acrescentar)? Rode só `orion passar m-… "motivo"` e encerre o turno: a mensagem vai para o próximo colega.
+  9. Chegou `[Interrompido por … ] Motivo: …`? Você foi parado de propósito: leve o motivo em conta antes de retomar qualquer coisa.
+  Você continua dono do que delegou: confira a resposta antes de passar ao usuário.
+
   ### Você como maestro (coordenar subagentes)
   Quando a tarefa se divide em partes independentes, dispare subagentes em vez de fazer tudo sozinho:
   1. `orion agente --claude|--codex|--gemini --pai $ORION_PAINEL [--papel "Dev"] [--nome "Vega"] [--pasta P] --mensagem "tarefa completa e autocontida"` cria um subagente seu (ele aparece dentro de você na barra lateral e no quadro), já trabalhando, sem tirar o usuário do que ele está vendo. O comando devolve o id do painel dele. Escreva a tarefa com tudo o que ele precisa: ele não vê a sua conversa.
   2. `orion filhos [--json]` lista os seus subagentes: id, personagem, papel, estado (`trabalhando`, `esperando`, `pronto`, `saiu`), tarefa.
   3. `orion esperar ID [--tempo S]` espera um deles parar; `orion esperar --filhos [--tempo S]` espera todos.
   4. `orion resultado ID [--linhas N]` devolve o que ele escreveu desde a última mensagem que recebeu (num bloco `<contexto-orion …>`). Leia, confira e só então responda ao usuário.
-  5. `orion enviar ID "ajuste…" --enter` manda uma correção; `orion interromper ID` para; `orion fechar ID` encerra quando não precisar mais (ele fica em "fechados há pouco").
+  5. `orion enviar ID "ajuste…" --enter` manda uma correção; `orion interromper ID [--motivo "por quê"]` para (com motivo, ele lê o porquê antes de seguir); `orion fechar ID` encerra quando não precisar mais (ele fica em "fechados há pouco").
   Com `--retorno` no passo 1, você nem precisa esperar: quando o subagente parar, o resultado chega sozinho na sua conversa como uma mensagem `[Subagente @nome terminou …]` com o caminho de um arquivo — leia o arquivo.
-  Boas práticas: no máximo 3–4 subagentes ao mesmo tempo; pastas ou arquivos diferentes para cada um (não ponha dois para editar o mesmo arquivo); marque `orion marcar ID revisar` no que o usuário precisa conferir.
+  Boas práticas: no máximo 3–4 subagentes ao mesmo tempo; pastas ou arquivos diferentes para cada um (não ponha dois para editar o mesmo arquivo); marque `orion marcar ID revisar` no que o usuário precisa conferir. Abriu um pull request? O cartão vai sozinho para Revisar quando o link do PR aparece na tela.
 
   ### Agentes e mensagens
   - `orion workspaces [--json]`, `orion workspace novo "Nome" --pasta P`, `orion workspace focar NOME|N`.
@@ -749,7 +783,9 @@ enum GuiaIA {
   - `orion agente --claude|--codex|--gemini [--workspace W] [--pasta P] [--conta ID] [--nome N] [--papel P] [--mensagem "tarefa"] [--fundo]` abre um agente (sem `--pai`, ele é independente). O nome que aparece vem da tarefa.
   - `orion enviar ID "texto" --enter` manda uma mensagem. `--mencionar OUTRO` leva junto o contexto do painel OUTRO; `--anexo ARQUIVO` leva imagem ou arquivo (imagem vai como caminho, que é como Claude Code e Codex leem imagem).
   - `orion contexto ID`, `orion ler ID [--linhas N]`, `orion interromper ID`, `orion reiniciar ID`, `orion compor ID "rascunho"` (deixa escrito para o usuário enviar).
-  - `orion marcar ID revisar|concluido|nada`, `orion personagem ID [--nome N] [--papel P]`.
+  - `orion marcar ID revisar|concluido|nada`, `orion personagem ID [--nome N] [--papel P] [--descricao "o que faz"]`.
+  - `orion setor [ID] "Nome"` põe um agente num setor (grupo dentro do workspace); `--setor "Nome"` em `orion agente` já cria nele. Subagentes nascem no setor do maestro.
+  - `orion hibernar ID` libera a memória de um agente parado (o processo fecha; volta na mesma conversa ao receber mensagem ou com `orion acordar ID`).
   - `orion fechados`, `orion reabrir [N|ID]` — agentes fechados há pouco voltam com a mesma conversa.
   - `orion contas`, `orion uso [--json]`, `orion conta ID CONTA`, `orion memoria`.
 

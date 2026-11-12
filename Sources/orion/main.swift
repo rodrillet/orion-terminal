@@ -24,14 +24,28 @@ Agentes (Claude Code / Codex / Gemini CLI) — cada um é um personagem
   orion compor ID ["texto"] [--anexo ARQ]… [--mencionar ID]… [--para ID]… [--focar] [--limpar]
   orion contexto [ID] [--linhas N]             tela recente / último comando, em bloco
   orion esperar ID [--tempo S]                 espera o agente parar / o comando terminar
-  orion interromper ID · orion reiniciar ID
+  orion interromper ID [--motivo "…"] · orion reiniciar ID · orion hibernar ID · orion acordar ID
+  orion setor [ID] "Nome"                    põe o agente num setor (cria se não existe; "" tira)
   orion marcar [ID] revisar|concluido|nada     coluna do quadro
-  orion personagem [ID] [--nome N] [--papel P] [--avatar FORMA] [--maestro]
+  orion personagem [ID] [--nome N] [--papel P] [--descricao "o que faz"] [--avatar FORMA] [--maestro]
                                                FORMA: gota bolha nuvem pilula hexa flor fantasma losango
   orion fechados · orion reabrir [N|ID] [--fundo]
                                                agentes fechados há pouco voltam na mesma conversa
   orion conta ID CONTA · orion conta --padrao CONTA · orion contas · orion uso [--atualizar]
   orion memoria [--json]
+
+Caixa de entrada (mensagens entre agentes — quem manda não espera)
+  orion mandar ID|@nome "texto" [--anexo ARQ]… [--sem-resposta]
+                                               entra quando o destinatário estiver livre; devolve o id.
+                                               A resposta chega sozinha na sua conversa.
+  orion mandar @time "texto" [--setor S] [--workspace W]
+                                               o Orion escolhe quem do time recebe (papel, tarefa,
+                                               quem está livre); se ele passar, vai para o próximo
+  orion passar ID_MSG ["motivo"]               não é com você: passa para o próximo do time
+  orion responder ID_MSG "Status: … | Resultado: … | Evidência: …" [--anexo ARQ]…
+  orion caixa [ID] [--tudo] [--json]           mensagens de/para um painel (padrão: as suas)
+  orion cancelar ID_MSG                        tira da fila (se ainda não entrou)
+  orion equipe [--workspace W] [--tudo]        quem é quem: personagem, papel, descrição, estado
 
 Maestro e subagentes
   orion agente --claude --pai $ORION_PAINEL [--papel P] [--retorno] --mensagem "tarefa"
@@ -103,6 +117,10 @@ while i < args.count {
   case "--pai": pedido["pai"] = valor()
   case "--sub": pedido["pai"] = "eu"
   case "--papel": pedido["papel"] = valor()
+  case "--setor": pedido["setor"] = valor()
+  case "--descricao": pedido["descricao"] = valor()
+  case "--sem-resposta": pedido["semResposta"] = true
+  case "--motivo": pedido["motivo"] = valor()
   case "--nome": pedido["nome"] = valor()
   case "--avatar": pedido["avatar"] = valor()
   case "--retorno": pedido["retorno"] = true
@@ -141,11 +159,17 @@ if !mencionar.isEmpty { pedido["mencionar"] = mencionar }
 if !para.isEmpty { pedido["para"] = para }
 
 switch cmd {
-case "ler", "esperar", "focar", "fechar", "dividir", "interromper", "reiniciar", "contexto", "filhos", "resultado", "personagem", "reabrir":
+case "ler", "esperar", "focar", "fechar", "dividir", "interromper", "reiniciar", "hibernar", "acordar", "contexto", "filhos", "resultado", "personagem", "reabrir":
   if let s = soltos.first { pedido["painel"] = s }
 case "liberar": pedido["porta"] = Int(soltos.first ?? "") ?? -1
 case "compor": if let s = soltos.first { pedido["painel"] = s }; if soltos.count >= 2 { pedido["texto"] = soltos[1] }
 case "marcar": if soltos.count >= 2 { pedido["painel"] = soltos[0]; pedido["marca"] = soltos[1] } else { pedido["marca"] = soltos.first ?? "" }
+case "mandar": if pedido["setor"] != nil, soltos.count == 1 { pedido["texto"] = soltos[0] } else if soltos.count >= 1 { pedido["painel"] = soltos[0] }; if soltos.count >= 2 { pedido["texto"] = soltos[1...].joined(separator: " ") }
+case "responder": if soltos.count >= 1 { pedido["mensagem"] = soltos[0] }; if soltos.count >= 2 { pedido["texto"] = soltos[1...].joined(separator: " ") }
+case "cancelar": pedido["mensagem"] = soltos.first ?? ""
+case "passar": if soltos.count >= 1 { pedido["mensagem"] = soltos[0] }; if soltos.count >= 2 { pedido["texto"] = soltos[1...].joined(separator: " ") }
+case "setor": if soltos.count >= 2 { pedido["painel"] = soltos[0]; pedido["setor"] = soltos[1...].joined(separator: " ") } else if soltos.count == 1 { pedido["setor"] = soltos[0] }
+case "caixa": if let s = soltos.first { pedido["painel"] = s }
 case "enviar": if soltos.count >= 2 { pedido["painel"] = soltos[0]; pedido["texto"] = soltos[1] } else if soltos.count == 1 { pedido["texto"] = soltos[0] }
 case "rodar": pedido["comando"] = soltos.joined(separator: " ")
 case "renomear": if soltos.count >= 2 { pedido["painel"] = soltos[0]; pedido["titulo"] = soltos[1] } else { pedido["titulo"] = soltos.first ?? "" }
@@ -252,6 +276,36 @@ case "filhos":
   if lista.isEmpty { print("nenhum subagente") }
   for a in lista {
     print("\(a["id"] as? String ?? "")  \(a["avatar"] as? String ?? "") \(a["personagem"] as? String ?? "")\((a["papel"] as? String).map { $0.isEmpty ? "" : " (\($0))" } ?? "")  \(a["tipo"] as? String ?? "")  \(a["estado"] as? String ?? "") há \(duracao(a["desde"] as? Int ?? 0))  \(a["titulo"] as? String ?? "")")
+  }
+case "mandar":
+  let fila = (r["estado"] as? String) == "naFila"
+  if (r["roteada"] as? Bool) == true, let depois = r["depois"] as? [String], !depois.isEmpty { print("roteada; se passar, vai para: \(depois.joined(separator: ", "))") }
+  print("\(r["id"] as? String ?? "")  → \(r["paraNome"] as? String ?? "")  \(fila ? "na fila (entra quando ele parar)" : "entregue")\((r["esperaResposta"] as? Bool) == true ? " · a resposta chega sozinha na sua conversa — encerre o turno" : "")")
+case "responder": print((r["passou"] as? Bool) == true ? "passou para \(r["para"] as? String ?? "")" : "resposta \(r["id"] as? String ?? "") → \(r["para"] as? String ?? "")")
+case "cancelar": print("cancelada: \(r["id"] as? String ?? "")")
+case "passar": let px = r["proximo"] as? String ?? ""; print(px.isEmpty ? "passou; ninguém mais no time — quem mandou foi avisado" : "passou para \(px)")
+case "interromper":
+  let c = r["cancelados"] as? [String] ?? []
+  if (r["interrompido"] as? Bool) == false { print("não interrompi; tirei da fila: \(c.joined(separator: ", "))") }
+  else if !c.isEmpty { print("interrompido; também tirei da fila: \(c.joined(separator: ", "))") }
+case "caixa":
+  let lista = r["mensagens"] as? [[String: Any]] ?? []
+  if lista.isEmpty { print("caixa vazia") }
+  for m in lista {
+    let seta = (m["entrada"] as? Bool) == true ? "⇠" : "⇢"
+    let texto = (m["texto"] as? String ?? "").replacingOccurrences(of: "\n", with: " ")
+    print("\(seta) \(m["id"] as? String ?? "")  \(m["deNome"] as? String ?? "") → \(m["paraNome"] as? String ?? "")  [\(m["rotulo"] as? String ?? "")]  \(texto.prefix(90))")
+  }
+case "equipe":
+  let lista = r["agentes"] as? [[String: Any]] ?? []
+  if lista.isEmpty { print("nenhum agente neste workspace") }
+  for a in lista {
+    let voce = (a["voce"] as? Bool) == true ? "  ← você" : ""
+    let papel = (a["papel"] as? String).map { $0.isEmpty ? "" : " (\($0))" } ?? ""
+    let fila = (a["caixa"] as? Int).map { "  ✉ \($0) na fila" } ?? ""
+    print("@\(a["apelido"] as? String ?? "")  \(a["personagem"] as? String ?? a["tipo"] as? String ?? "")\(papel)  \(a["tipo"] as? String ?? "")  \(a["estado"] as? String ?? "")  \(a["id"] as? String ?? "")\(fila)\(voce)")
+    if let d = a["descricao"] as? String, !d.isEmpty { print("    \(d.replacingOccurrences(of: "\n", with: " "))") }
+    else if let t = a["titulo"] as? String { print("    tarefa: \(t)") }
   }
 case "personagem": print("\(r["personagem"] as? String ?? "")\((r["papel"] as? String).map { $0.isEmpty ? "" : " (\($0))" } ?? "")  @\(r["apelido"] as? String ?? "")")
 case "fechados":

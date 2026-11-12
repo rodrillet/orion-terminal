@@ -52,6 +52,47 @@ enum Memoria {
     return saida
   }
 
+  /// Memória que o Mac ainda tem para dar (livre + inativa + purgável), em bytes — a mesma conta
+  /// que o macOS faz antes de começar a comprimir e usar swap.
+  static func disponivel() -> UInt64 {
+    var stats = vm_statistics64_data_t()
+    var n = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
+    let r = withUnsafeMutablePointer(to: &stats) {
+      $0.withMemoryRebound(to: integer_t.self, capacity: Int(n)) { host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &n) }
+    }
+    guard r == KERN_SUCCESS else { return .max }
+    let pagina = UInt64(vm_kernel_page_size)
+    return (UInt64(stats.free_count) + UInt64(stats.inactive_count) + UInt64(stats.purgeable_count)) * pagina
+  }
+
+  /// Nomes curtos (até 16 letras) dos processos abaixo de `raiz` — para saber se um agente
+  /// parado ainda tem um comando rodando (o Bash do Claude roda como filho dele).
+  static func descendentes(_ raiz: pid_t) -> [String] {
+    let total = proc_listallpids(nil, 0)
+    guard total > 0 else { return [] }
+    var pids = [pid_t](repeating: 0, count: Int(total) + 64)
+    let lidos = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+    guard lidos > 0 else { return [] }
+    var filhos: [pid_t: [pid_t]] = [:]
+    var nomes: [pid_t: String] = [:]
+    var bsd = proc_bsdinfo()
+    let tam = Int32(MemoryLayout<proc_bsdinfo>.size)
+    for p in pids.prefix(Int(lidos)) where p > 1 {
+      guard proc_pidinfo(p, PROC_PIDTBSDINFO, 0, &bsd, tam) == tam else { continue }
+      filhos[pid_t(bsd.pbi_ppid), default: []].append(p)
+      nomes[p] = withUnsafeBytes(of: bsd.pbi_comm) { b in String(decoding: b.prefix { $0 != 0 }, as: UTF8.self) }
+    }
+    var saida: [String] = []
+    var fila = filhos[raiz] ?? []
+    var vistos = Set<pid_t>()
+    while let p = fila.popLast() {
+      guard vistos.insert(p).inserted, vistos.count < 500 else { continue }
+      saida.append(nomes[p] ?? "")
+      fila.append(contentsOf: filhos[p] ?? [])
+    }
+    return saida
+  }
+
   /// Devolve ao sistema as páginas que ficaram livres no heap (depois de fechar o quadro, os
   /// ajustes, um diálogo): sem isso a memória "usada" fica no pico mesmo com tudo fechado.
   static func aliviar() {

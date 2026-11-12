@@ -100,12 +100,12 @@ extension Loja {
   func lembrarFechado(_ p: Painel) {
     guard let tipo = p.tipoAgente, let a = p.aba else { return }
     let conta = a.conta(tipo)
-    let sessao = Sessoes.descobrir(tipo: tipo, config: self.conta(conta)?.dir, cwd: p.cwd, desde: p.iniciadoEm, atividade: p.leitor.ultimaSaida) ?? p.no.sessao
+    let sessao = p.idDaConversa()
     let w = workspace(de: a)
     fechados.removeAll { $0.id == p.id }
     fechados.insert(Fechado(id: p.id, tipo: tipo, pasta: p.cwd, workspace: a.workspace, workspaceNome: w?.nome ?? "", conta: conta,
                             titulo: a.titulo ?? p.titulo, persona: p.persona, tarefa: p.tarefa, pai: p.pai, sessao: sessao), at: 0)
-    if fechados.count > 20 { fechados.removeLast(fechados.count - 20) }
+    if fechados.count > Loja.limiteFechados { fechados.removeLast(fechados.count - Loja.limiteFechados) }
     Armazem.gravar("fechados.json", fechados.map(\.dicionario))
   }
 
@@ -118,22 +118,46 @@ extension Loja {
     let ws = workspace(f.workspace) ?? workspaces.first { $0.nome == f.workspaceNome }
     let a = criarAba(kind: f.tipo, cwd: f.pasta, workspace: ws?.id, conta: conta(f.conta) != nil ? f.conta : nil,
                      comando: fer.retomar(base, sessao: f.sessao), titulo: nil, ativar: ativar, persona: f.persona,
-                     pai: f.pai.flatMap { acharPainel($0) != nil ? $0 : nil })
+                     pai: f.pai.flatMap { acharPainel($0) != nil ? $0 : nil },
+                     idPainel: f.id)     // mesmo id: os subagentes dele continuam apontando para ele
     if let n = a.arvore.folhas.first { n.tarefa = f.tarefa; n.sessao = f.sessao; paineis[n.id]?.tarefa = f.tarefa }
     if !ativar { painelPrincipal(a)?.acordar() }
     return a
   }
+
+  /// Quantos agentes fechados o histórico guarda.
+  static let limiteFechados = 50
 
   func esquecerFechados() {
     fechados = []
     Armazem.gravar("fechados.json", [])
   }
 
+  /// Tira um agente do histórico (a conversa continua guardada pela própria ferramenta).
+  func esquecer(_ f: Fechado) {
+    fechados.removeAll { $0.id == f.id }
+    Armazem.gravar("fechados.json", fechados.map(\.dicionario))
+  }
+
+  /// Limpa o histórico (todo, ou só um workspace), com confirmação.
+  func esquecerFechadosPerguntando(workspace: String? = nil) {
+    let alvo = workspace.map { w in fechados.filter { $0.workspace == w } } ?? fechados
+    guard !alvo.isEmpty else { return }
+    let nome = workspace.flatMap { self.workspace($0)?.nome }
+    confirmar(nome.map { "Limpar o histórico de “\($0)”?" } ?? "Limpar todo o histórico?",
+              "\(alvo.count) agente\(alvo.count == 1 ? "" : "s") sai\(alvo.count == 1 ? "" : "em") da lista. As conversas continuam no Claude/Codex/Gemini.",
+              "Limpar", destrutivo: true, simbolo: "trash") { [weak self] in
+      guard let self else { return }
+      if let workspace { self.fechados.removeAll { $0.workspace == workspace } } else { self.fechados = [] }
+      Armazem.gravar("fechados.json", self.fechados.map(\.dicionario))
+    }
+  }
+
   /// Antes de salvar para sair: anota o id da conversa de cada agente vivo (volta exatamente nela).
   func anotarSessoes() {
     for p in paineis.values where p.vivo {
-      guard let tipo = p.agente, let a = p.aba else { continue }
-      if let s = Sessoes.descobrir(tipo: tipo, config: conta(a.conta(tipo))?.dir, cwd: p.cwd, desde: p.iniciadoEm, atividade: p.leitor.ultimaSaida) { p.no.sessao = s }
+      guard p.agente != nil else { continue }
+      if let s = p.idDaConversa() { p.no.sessao = s }
     }
   }
 }

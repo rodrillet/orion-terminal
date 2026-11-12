@@ -41,6 +41,7 @@ struct JanelaRaiz: View {
           .transition(.opacity)
       }
       CamadaUso(loja: loja)
+      CamadaAviso(loja: loja)
       CamadaDialogo(loja: loja, emAjustes: false)
     }
     .onGeometryChange(for: CGFloat.self) { ($0.size.width / 20).rounded() * 20 } action: { largura = $0 }
@@ -88,6 +89,58 @@ extension EstadoPainel {
     case .saiu: return Cor.vermelho
     case .pronto: return Cor.verde.opacity(0.55)
     case .dormindo: return Cor.texto4
+    }
+  }
+}
+
+extension EstadoPainel {
+  /// Ícone do estado: o estado vai num chip com ícone, nunca só numa cor.
+  var simbolo: String {
+    switch self {
+    case .trabalhando: return "ellipsis"
+    case .esperando: return "hourglass"
+    case .rodando: return "play.fill"
+    case .saiu: return "xmark"
+    case .pronto: return "checkmark"
+    case .dormindo: return "moon.zzz"
+    }
+  }
+}
+
+/// Etiqueta de estado: ícone + palavra num fundo suave da cor. Serve ao chat, à barra lateral e
+/// ao quadro, para "esperando você" e "pede permissão" se lerem iguais em todo lugar.
+struct ChipRotulo: View {
+  let simbolo: String
+  let texto: String
+  var cor: Color = Cor.texto3
+  var compacto = false
+  var body: some View {
+    HStack(spacing: compacto ? 3 : 4) {
+      Image(systemName: simbolo).font(.system(size: compacto ? 8 : 9, weight: .bold))
+      Text(texto).lineLimit(1)
+    }
+    .font(F.ui(compacto ? 10.5 : 11, .semibold)).foregroundStyle(cor)
+    .padding(.horizontal, compacto ? 5 : 7).frame(height: compacto ? 17 : 20)
+    .background(RoundedRectangle(cornerRadius: compacto ? 5 : 6, style: .continuous).fill(cor.opacity(0.14)))
+    .fixedSize()
+  }
+}
+
+/// O estado de um agente como chip: pede permissão · esperando você · trabalhando.
+struct ChipEstado: View {
+  let painel: Painel
+  var compacto = false
+  var body: some View {
+    if painel.hibernado {
+      ChipRotulo(simbolo: "moon.zzz.fill", texto: "hibernando", cor: Cor.texto3, compacto: compacto)
+    } else if painel.permissao != nil {
+      ChipRotulo(simbolo: "hand.raised.fill", texto: "pede permissão", cor: Cor.ambar, compacto: compacto)
+    } else if painel.aba?.atencao == true || painel.estado == .esperando {
+      ChipRotulo(simbolo: "hourglass", texto: "esperando você", cor: Cor.ambar, compacto: compacto)
+    } else if painel.estado == .trabalhando {
+      ChipRotulo(simbolo: "ellipsis", texto: "trabalhando", cor: Cor.verde, compacto: compacto)
+    } else {
+      ChipRotulo(simbolo: painel.estado.simbolo, texto: painel.estado.rotulo.lowercased(), cor: Cor.texto3, compacto: compacto)
     }
   }
 }
@@ -426,8 +479,24 @@ struct MenuDaAba: View {
       Button(p.maestro ? "Deixar de ser maestro" : "Marcar como maestro") { p.maestro.toggle(); loja.salvarDepois() }
       Button(p.conversa ? "Ver como terminal" : "Ver como conversa") { loja.ativar(aba); p.conversa.toggle() }
     }
+    if loja.painelPrincipal(aba)?.tipoAgente != nil, let w = loja.workspace(de: aba) {
+      Menu("Setor") {
+        ForEach(w.setores, id: \.self) { st in
+          Button { loja.definirSetor(aba, st) } label: { if aba.setor == st { Label(st, systemImage: "checkmark") } else { Text(st) } }
+        }
+        if !w.setores.isEmpty { Divider() }
+        Button("Novo setor…") { loja.novoSetorPerguntando(para: aba) }
+        if aba.setor != nil { Button("Tirar do setor") { loja.definirSetor(aba, nil) } }
+      }
+    }
     Button("Duplicar") { loja.duplicar(aba) }
     Button("Reiniciar sessão") { loja.paineisDaAba(aba).forEach { $0.reiniciar() } }
+    if let p = loja.painelPrincipal(aba), p.tipoAgente != nil {
+      if p.hibernado { Button("Acordar (retomar a conversa)") { p.acordar() } }
+      else if p.vivo { Button("Hibernar agora (libera a memória)") { loja.hibernarAgora(p) } }
+      if p.vivo && p.estado == .trabalhando { Button("Parar com motivo…") { loja.pararComMotivoPerguntando(p) } }
+      if let pr = p.pr, let u = URL(string: pr) { Button("Abrir o PR #\(u.lastPathComponent)") { NSWorkspace.shared.open(u) } }
+    }
     Menu("Cor") {
       Button("Sem cor") { aba.cor = nil; loja.salvarDepois() }
       ForEach(Cor.paletaGrupos, id: \.self) { c in Button(nomeCor(c)) { aba.cor = c; loja.salvarDepois() } }
@@ -474,7 +543,7 @@ struct ListaFechados: View {
       HStack {
         Text("Fechados há pouco").font(F.ui(13, .semibold)).foregroundStyle(Cor.texto)
         Spacer()
-        if !loja.fechados.isEmpty { Button("Esquecer todos") { loja.esquecerFechados() }.buttonStyle(.plain).foregroundStyle(Cor.texto3).font(F.ui(11.5)) }
+        if !loja.fechados.isEmpty { Button("Limpar tudo") { aberto = false; loja.esquecerFechadosPerguntando() }.buttonStyle(.plain).foregroundStyle(Cor.texto3).font(F.ui(11.5)) }
       }
       .padding(12)
       Divider()

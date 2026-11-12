@@ -57,11 +57,17 @@ struct Persona: Equatable {
   var avatar: String      // forma do mascote (Mascote.formas)
   var cor: String
   var papel: String       // "Maestro", "Dev", "Revisor"… (vazio = sem papel definido)
+  /// O que este agente faz e quando mandar trabalho para ele (os colegas leem em `orion equipe`).
+  var descricao = ""
 
-  var dicionario: [String: Any] { ["nome": nome, "avatar": avatar, "cor": cor, "papel": papel] }
+  var dicionario: [String: Any] {
+    var d: [String: Any] = ["nome": nome, "avatar": avatar, "cor": cor, "papel": papel]
+    if !descricao.isEmpty { d["descricao"] = descricao }
+    return d
+  }
 
-  init(nome: String, avatar: String, cor: String, papel: String = "") {
-    self.nome = nome; self.avatar = avatar; self.cor = cor; self.papel = papel
+  init(nome: String, avatar: String, cor: String, papel: String = "", descricao: String = "") {
+    self.nome = nome; self.avatar = avatar; self.cor = cor; self.papel = papel; self.descricao = descricao
   }
 
   init?(_ d: [String: Any]?) {
@@ -70,6 +76,7 @@ struct Persona: Equatable {
     avatar = d["avatar"] as? String ?? ""
     cor = d["cor"] as? String ?? "#7aa2ff"
     papel = d["papel"] as? String ?? ""
+    descricao = d["descricao"] as? String ?? ""
   }
 
   /// Elenco: estrelas e constelações (a família é Orion), cada uma com a sua forma e a sua cor.
@@ -143,12 +150,13 @@ enum Sessoes {
 
   /// Id da sessão mais provável: o arquivo mexido mais perto de `atividade` (a última saída do
   /// painel), criado depois que o agente abriu.
-  static func descobrir(tipo: String, config: String?, cwd: String, desde: Date, atividade: Date) -> String? {
+  static func descobrir(tipo: String, config: String?, cwd: String, desde: Date, atividade: Date, excluir: Set<String> = []) -> String? {
     let fm = FileManager.default
     var candidatos: [(String, Date)] = []
     func olhar(_ u: URL, id: (String) -> String?) {
       guard u.pathExtension == "jsonl", let v = try? u.resourceValues(forKeys: [.contentModificationDateKey]),
-            let m = v.contentModificationDate, m >= desde.addingTimeInterval(-5), let i = id(u.deletingPathExtension().lastPathComponent) else { return }
+            let m = v.contentModificationDate, m >= desde.addingTimeInterval(-5), let i = id(u.deletingPathExtension().lastPathComponent),
+            !excluir.contains(i) else { return }
       candidatos.append((i, m))
     }
     switch tipo {

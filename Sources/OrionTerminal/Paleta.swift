@@ -17,7 +17,37 @@ struct Paleta: View {
     var cor: String? = nil
     var atalho = ""
     var marcado = false
+    var persona: Persona? = nil
     let rodar: () -> Void
+  }
+
+  /// "Pedir a…": com texto digitado, cada agente do workspace vira um destino para ele (como
+  /// mandar pelo compose: ocupado, entra na fila). "@lyra texto" escolhe o agente direto.
+  var pedidos: [Item] {
+    var t = termo.trimmingCharacters(in: .whitespaces)
+    guard t.count >= 3 else { return [] }
+    var agentes = loja.agentes(workspace: loja.workspaceAtivo?.id).filter { $0.persona != nil }
+    if agentes.isEmpty { agentes = loja.agentes().filter { $0.persona != nil } }
+    if t.hasPrefix("@"), let espaco = t.firstIndex(of: " ") {
+      let nome = t[t.index(after: t.startIndex)..<espaco].lowercased()
+      let escolhidos = agentes.filter { ($0.persona?.nome ?? "").lowercased().folding(options: .diacriticInsensitive, locale: nil).hasPrefix(nome) }
+      guard !escolhidos.isEmpty else { return [] }
+      agentes = escolhidos
+      t = String(t[espaco...]).trimmingCharacters(in: .whitespaces)
+      guard !t.isEmpty else { return [] }
+    } else if t.hasPrefix("@") { return [] }
+    let texto = t
+    return agentes.prefix(6).map { p in
+      let ps = p.persona!
+      let ocupado = p.estado == .trabalhando
+      return Item(grupo: "Pedir a um agente", rotulo: "Pedir a \(ps.nome): “\(texto)”",
+                  detalhe: [ps.papel, ocupado ? "ocupado — vai para a fila" : p.estado.rotulo.lowercased(), loja.titulo(p.aba!)].filter { !$0.isEmpty }.joined(separator: " · "),
+                  simbolo: "paperplane", persona: ps) { [weak p] in
+        guard let p, let a = p.aba else { return }
+        loja.enviarComposto(de: p, texto: texto, anexos: [])
+        loja.ativar(a); loja.focar(p)
+      }
+    }
   }
 
   var itens: [Item] {
@@ -29,11 +59,15 @@ struct Paleta: View {
       it.append(Item(grupo: "Ações", rotulo: "Novo \(f.nome)", programa: f.id, atalho: f.atalho) { loja.criarAba(kind: f.id) })
     }
     acao("Quadro de agentes", "square.grid.2x2", "⇧⌘A") { loja.abrirQuadro(true) }
+    let esperando = loja.esperandoVoce()
+    if !esperando.isEmpty {
+      acao("Ir para quem espera você (\(esperando.count))", "hourglass", "⌘J") { loja.irParaProximoEsperando() }
+    }
     if let f = loja.fechados.first { acao("Reabrir “\(f.titulo)” (fechado há pouco)", "clock.arrow.circlepath", "⌥⌘Z") { loja.reabrir(f) } }
     if let p = loja.painelAtivo, p.tipoAgente != nil {
       acao("Novo subagente de \(p.persona?.nome ?? "este agente")", "arrow.triangle.branch", "") { loja.novoAgentePerguntando(kind: p.tipoAgente ?? "claude", pai: p.id) }
       acao("Editar o personagem deste agente", "person.crop.circle", "") { loja.editarPersonagem(p) }
-      acao(p.conversa ? "Ver como terminal" : "Ver como conversa", "bubble.left.and.bubble.right", "⌥⌘C") { p.conversa.toggle() }
+      acao(p.conversa ? "Ver como terminal" : "Ver como conversa", p.conversa ? "terminal" : "text.bubble", "⌥⌘C") { p.conversa.toggle() }
     }
     for porta in loja.portas where porta.painel != nil {
       acao("Liberar a porta \(porta.porta) (\(porta.processo))", "xmark.octagon", "") { loja.liberarPerguntando(porta) }
@@ -49,6 +83,8 @@ struct Paleta: View {
     acao("Renomear aba", "pencil", "⇧⌘R") { if let a = loja.abaAtiva { loja.renomear(a) } }
     acao("Reiniciar sessão", "arrow.clockwise", "⌥⌘R") { loja.painelAtivo?.reiniciar() }
     acao("Interromper o que está rodando", "stop.circle", "") { loja.painelAtivo?.interromper() }
+    acao("Parar o agente com motivo…", "stop.circle", "") { if let p = loja.painelAtivo { loja.pararComMotivoPerguntando(p) } }
+    acao("Perguntar ao time… (o Orion escolhe quem responde)", "person.3", "") { loja.perguntarAoTimePerguntando() }
     acao("Mostrar/esconder barra lateral", "sidebar.left", "⌘B") { loja.ajustes.barraLateral.toggle() }
     acao("Mostrar/esconder barra de agentes", "rectangle.bottomthird.inset.filled", "") { loja.ajustes.barraAgentes.toggle() }
     acao("Atualizar o uso das contas agora", "chart.bar", "") { loja.atualizarUsos(forcar: true) }
@@ -108,8 +144,10 @@ struct Paleta: View {
   var filtrados: [Item] {
     let t = termo.trimmingCharacters(in: .whitespaces).lowercased()
     guard !t.isEmpty else { return itens }
-    return itens.map { ($0, Paleta.pontuar($0.rotulo.lowercased(), t) + Paleta.pontuar($0.detalhe.lowercased(), t) * 0.5) }
+    let achados = itens.map { ($0, Paleta.pontuar($0.rotulo.lowercased(), t) + Paleta.pontuar($0.detalhe.lowercased(), t) * 0.5) }
       .filter { $0.1 > 0 }.sorted { $0.1 > $1.1 }.map(\.0)
+    // Achou pouca coisa: o texto provavelmente é um pedido — os agentes vêm primeiro.
+    return achados.count < 3 || t.hasPrefix("@") ? pedidos + achados : achados + pedidos
   }
 
   static func pontuar(_ alvo: String, _ termo: String) -> Double {
@@ -128,7 +166,7 @@ struct Paleta: View {
     VStack(spacing: 0) {
       HStack(spacing: 10) {
         Image(systemName: "magnifyingglass").font(F.ui(15)).foregroundStyle(Cor.texto3)
-        TextField("Workspace, agente, aba, conta, comando, tema ou pasta…", text: $termo)
+        TextField("Buscar, ou escreva um pedido para um agente (@nome texto)…", text: $termo)
           .textFieldStyle(.plain).font(F.ui(15)).focused($focado)
           .onSubmit { executar(lista) }
           .onKeyPress(.downArrow) { sel = min(sel + 1, lista.count - 1); return .handled }
@@ -167,7 +205,8 @@ struct Paleta: View {
   @ViewBuilder func linha(_ item: Item, selecionado: Bool) -> some View {
     HStack(spacing: 11) {
       Group {
-        if let p = item.programa { IconePrograma(processo: p, tamanho: 24) }
+        if let ps = item.persona { AvatarPersona(persona: ps, tamanho: 24, fixo: true) }
+        else if let p = item.programa { IconePrograma(processo: p, tamanho: 24) }
         else if let c = item.cor { Circle().fill(Color(hex: c)).frame(width: 10, height: 10).frame(width: 20) }
         else { Image(systemName: item.simbolo ?? "circle").font(F.ui(13)).foregroundStyle(Cor.texto2).frame(width: 20) }
       }

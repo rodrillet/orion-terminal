@@ -276,6 +276,7 @@ struct CartaoAgente: View {
             HStack(spacing: 4) {
               Text(persona.nome).foregroundStyle(Color(hex: persona.cor)).brightness(Cor.claro ? -0.3 : 0).fontWeight(.medium).lineLimit(1)
               if !persona.papel.isEmpty { Text("· \(persona.papel)").foregroundStyle(Cor.texto3).lineLimit(1) }
+              if let st = aba?.setor { EtiquetaLinha(texto: st) }
               if let pai = painel.pai.flatMap({ loja.acharPainel($0) }) {
                 Text("↳ \(pai.persona?.nome ?? "maestro")").foregroundStyle(Cor.ambar).lineLimit(1)
                   .help("Subagente de \(pai.persona?.nome ?? pai.titulo) — clique para selecionar o maestro")
@@ -356,6 +357,14 @@ struct CartaoAgente: View {
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("Marcar, renomear, reiniciar, conta, fechar")
         Spacer(minLength: 0)
+        if let pr = painel.pr, let u = URL(string: pr) {
+          Button { NSWorkspace.shared.open(u) } label: {
+            Label("#\(u.lastPathComponent)", systemImage: "arrow.triangle.pull").font(F.ui(10.5, .semibold)).labelStyle(.titleAndIcon)
+              .foregroundStyle(Cor.azul).padding(.horizontal, 6).frame(height: 18)
+              .background(Capsule().fill(Cor.azul.opacity(0.12)))
+          }
+          .buttonStyle(.plain).fixedSize().layoutPriority(1).help("Pull request aberto pelo agente — clique para abrir\n\(pr)")
+        }
         if let m = painel.marca {
           Image(systemName: m == "revisar" ? "eye.fill" : "checkmark.circle.fill").font(.system(size: 11))
             .foregroundStyle(m == "revisar" ? Cor.azul : Cor.lilas).help(m == "revisar" ? "Marcado para revisar" : "Marcado como concluído")
@@ -381,8 +390,8 @@ struct CartaoAgente: View {
         }
         .padding(7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: R.pequeno + 2, style: .continuous).fill(Cor.ambar.opacity(0.07)))
-        .overlay(RoundedRectangle(cornerRadius: R.pequeno + 2, style: .continuous).strokeBorder(Cor.ambar.opacity(0.22)))
+        .background(RoundedRectangle(cornerRadius: R.pequeno + 2, style: .continuous).fill(Cor.vidro))
+        .overlay(RoundedRectangle(cornerRadius: R.pequeno + 2, style: .continuous).strokeBorder(Cor.linha))
       }
       if loja.quadroMensagem == painel.id {
         ComposeView(painel: painel, embutido: true)
@@ -403,9 +412,7 @@ struct CartaoAgente: View {
 
   func linhaEstado(tempo: Bool, branch: Bool) -> some View {
     HStack(spacing: 6) {
-      Circle().fill(painel.estado.cor).frame(width: 7, height: 7)
-      Text(painel.estado.rotulo).foregroundStyle(painel.estado == .dormindo || painel.estado == .pronto ? Cor.texto3 : painel.estado.cor).lineLimit(1)
-        .fixedSize(horizontal: tempo, vertical: false)
+      ChipEstado(painel: painel, compacto: true)
       if tempo && painel.estado != .dormindo { Ha(desde: painel.desde, prefixo: "há ").foregroundStyle(Cor.texto3) }
       Spacer(minLength: 2)
       if branch && !painel.branch.isEmpty {

@@ -12,10 +12,10 @@ import ImageIO
 // Convive com o teclado direto no terminal: ⌘E alterna o foco, esc devolve ao terminal.
 
 struct Anexo: Identifiable, Equatable {
-  enum Tipo: String { case imagem, contexto, destino }
+  enum Tipo: String { case imagem, arquivo, contexto, destino }
   let id = UUID()
   let tipo: Tipo
-  let valor: String      // caminho do arquivo (imagem) ou id do painel (contexto, destino)
+  let valor: String      // caminho (imagem, arquivo/pasta) ou id do painel (contexto, destino)
   var rotulo: String
 }
 
@@ -184,6 +184,23 @@ final class Rascunho {
   func enviar(_ painel: Painel) {
     guard !vazio else { return }
     fecharMencao(painel)
+    // "@time …" / "@equipe …": o roteador escolhe quem do workspace responde.
+    let limpo = texto.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let primeira = limpo.split(separator: " ", maxSplits: 1).first, Loja.ehTime(String(primeira)), primeira.hasPrefix("@") {
+      let corpo = String(limpo.dropFirst(primeira.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !corpo.isEmpty else { return }
+      let loja = painel.loja
+      let caminhos = anexos.filter { $0.tipo == .imagem || $0.tipo == .arquivo }.map(\.valor)
+      let eu: Painel? = painel.tipoAgente != nil ? painel : nil
+      let wid = painel.aba.flatMap { loja.workspace(de: $0) }?.id
+      if let m = loja.mandarAoTime(de: eu, texto: corpo, anexos: caminhos, workspace: wid) {
+        loja.avisoRapido("Roteado para \(loja.acharPainel(m.para)?.persona?.nome ?? m.paraNome)", segundos: 3)
+        anexos = []; posHistorico = -1; definir("")
+      } else {
+        loja.avisoRapido("Nenhum outro agente neste workspace", segundos: 3)
+      }
+      return
+    }
     // Terminais mencionados por etiqueta no texto: o contexto de cada um vai junto.
     var todos = anexos
     for e in campo?.etiquetas ?? [] {
@@ -324,7 +341,8 @@ extension Painel {
     focarCompose()
   }
 
-  /// Imagens viram chips (anexos); o resto entra no texto como @caminho.
+  /// Imagens e arquivos viram cartões de anexo (com prévia); ao enviar, os arquivos entram na
+  /// mensagem como @caminho e as imagens vão coladas antes do texto.
   func anexar(caminhos: [String]) {
     for c in caminhos {
       if Compose.ehImagem(c) {
@@ -332,7 +350,8 @@ extension Painel {
       } else {
         var ehDir: ObjCBool = false
         FileManager.default.fileExists(atPath: c, isDirectory: &ehDir)
-        mencionarNoCompose(caminho: c + (ehDir.boolValue && !c.hasSuffix("/") ? "/" : ""))
+        let caminho = ehDir.boolValue && !c.hasSuffix("/") ? c + "/" : c
+        rascunho.anexar(Anexo(tipo: .arquivo, valor: caminho, rotulo: (c as NSString).lastPathComponent + (ehDir.boolValue ? "/" : "")))
       }
     }
     if !composeVisivel { rascunho.manual = true; atualizarCompose() }
@@ -486,10 +505,27 @@ extension Loja {
   /// como destino. Imagens vão antes (cada caminho colado sozinho, que é como o Claude Code e o
   /// Codex reconhecem imagem); depois o texto, com o contexto dos terminais mencionados; por fim ↩.
   @discardableResult
-  func enviarComposto(de origem: Painel, texto: String, anexos: [Anexo], enter: Bool = true, lembrar: Bool = true) -> [String] {
+  func enviarComposto(de origem: Painel, texto: String, anexos: [Anexo], enter: Bool = true, lembrar: Bool = true,
+                      remetente: String? = nil) -> [String] {
     var destinos = anexos.filter { $0.tipo == .destino }.compactMap { acharPainel($0.valor) }
     if destinos.isEmpty { destinos = [origem] }
+    // Para outro agente que está no meio de um trabalho: vai para a caixa dele e entra quando ele parar.
+    let ocupados = destinos.filter { $0 !== origem && $0.tipoAgente != nil && !livreParaReceber($0) }
+    if !ocupados.isEmpty {
+      let caminhos = anexos.filter { $0.tipo == .imagem || $0.tipo == .arquivo }.map(\.valor)
+      var corpo = texto.trimmingCharacters(in: .whitespacesAndNewlines)
+      for a in anexos where a.tipo == .contexto {
+        if let p = acharPainel(a.valor) { corpo += (corpo.isEmpty ? "" : "\n\n") + Compose.contexto(de: p, apelido: a.rotulo, loja: self) }
+      }
+      for d in ocupados { mandar(de: origem, para: d, texto: corpo, anexos: caminhos, esperaResposta: origem.tipoAgente != nil) }
+      if lembrar { lembrarNoCompose(texto) }
+      avisoRapido(ocupados.count == 1 ? "\(ocupados[0].persona?.nome ?? "O agente") está trabalhando — a mensagem entra quando ele parar"
+                                      : "Mensagens na fila: entram quando cada agente parar")
+      destinos.removeAll { d in ocupados.contains { $0 === d } }
+      if destinos.isEmpty { return ocupados.map(\.id) }
+    }
     let imagens = anexos.filter { $0.tipo == .imagem }.map(\.valor)
+    let arquivos = anexos.filter { $0.tipo == .arquivo }.map(\.valor)
     var corpo = texto.trimmingCharacters(in: .whitespacesAndNewlines)
     for a in anexos where a.tipo == .contexto {
       guard let p = acharPainel(a.valor) else { continue }
@@ -500,11 +536,21 @@ extension Loja {
       // A primeira mensagem dá nome à tarefa do agente; todas ficam guardadas para a vista de conversa.
       let limpo = texto.trimmingCharacters(in: .whitespacesAndNewlines)
       if d.tipoAgente != nil, d.tarefa == nil, lembrar, let t = Nomes.tarefaCurta(limpo) { d.tarefa = t; salvarDepois() }
-      if !limpo.isEmpty || !imagens.isEmpty {
-        d.enviadas.append(Conversa.Enviada(texto: limpo.isEmpty ? "(\(imagens.count) imagem\(imagens.count == 1 ? "" : "s"))" : limpo, em: Date(), linha: d.linhaDoCursor()))
+      if !limpo.isEmpty || !imagens.isEmpty || !arquivos.isEmpty {
+        d.enviadas.append(Conversa.Enviada(texto: limpo, em: Date(), linha: d.linhaDoCursor(), anexos: imagens + arquivos, de: remetente))
         if d.enviadas.count > 200 { d.enviadas.removeFirst(d.enviadas.count - 200) }
       }
       var msg = corpo
+      if !arquivos.isEmpty {
+        // Arquivos anexados entram como @caminho (relativo à pasta de quem recebe).
+        // Num shell comum, o caminho vai entre aspas (é um argumento de comando).
+        let refs = arquivos.map { a -> String in
+          let barra = a.hasSuffix("/") && a.count > 1
+          if d.tipoAgente == nil { return Compose.entreAspas(barra ? String(a.dropLast()) : a) }
+          return Compose.mencao(Compose.referencia(barra ? String(a.dropLast()) : a, cwd: d.cwd) + (barra ? "/" : ""))
+        }
+        msg += (msg.isEmpty ? "" : "\n") + refs.joined(separator: " ")
+      }
       if d !== origem {
         let ws = origem.aba.flatMap { workspace(de: $0) }?.nome ?? ""
         msg = "[Mensagem de @\(origem.apelido)\(ws.isEmpty ? "" : " · workspace \(ws)")]\n" + msg
@@ -514,10 +560,34 @@ extension Loja {
     return destinos.map(\.id)
   }
 
+  /// Painel dormindo (ou hibernado): acorda e só chama `pronto` quando o agente já subiu e parou
+  /// de desenhar a tela — um tempo fixo deixava a mensagem cair no shell quando o --resume
+  /// de uma conversa longa demorava.
+  func quandoPronto(_ d: Painel, inicio: Date = Date(), falhou: (() -> Void)? = nil, _ pronto: @escaping () -> Void) {
+    if !d.iniciado { d.acordar() }
+    let agente = Ferramenta.eh(d.tipo)
+    let espera = Date().timeIntervalSince(inicio)
+    let ok = d.vivo && (agente ? d.agente != nil && espera > 2 && Date().timeIntervalSince(d.leitor.ultimaSaida) > 1.2 && d.permissao == nil
+                               : espera > 1 && d.ocioso)
+    if ok { pronto(); return }
+    guard espera < 45, d.vivo || espera < 3 else {
+      if d.vivo && (!agente || d.agente != nil) { pronto() }
+      else { falhou?(); avisoRapido("\(d.persona?.nome ?? "O terminal") não abriu a tempo — a mensagem ficou no compose dele", segundos: 5) }
+      return
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak d] in
+      MainActor.assumeIsolated { if let d { self?.quandoPronto(d, inicio: inicio, falhou: falhou, pronto) } }
+    }
+  }
+
   private func entregar(_ d: Painel, imagens: [String], mensagem: String, enter: Bool) {
-    var espera = 0.0
-    if !d.iniciado { d.acordar(); espera = 2.5 }
-    DispatchQueue.main.asyncAfter(deadline: .now() + espera) { [weak d] in
+    if !d.iniciado {
+      quandoPronto(d, falhou: { [weak d] in d?.rascunho.definir(mensagem) }) { [weak self, weak d] in
+        if let d { self?.entregar(d, imagens: imagens, mensagem: mensagem, enter: enter) }
+      }
+      return
+    }
+    DispatchQueue.main.async { [weak d] in
       MainActor.assumeIsolated {
         guard let d, d.vivo else { return }
         let agente = d.tipoAgente != nil && !d.ocioso
@@ -830,19 +900,25 @@ struct ComposeView: View {
   @Bindable var painel: Painel
   /// Dentro de um cartão do quadro: a lista de menções aparece embutida, acima do campo.
   var embutido = false
+  @Estado private var sobre = false
 
   var body: some View {
     let r = painel.rascunho
     let tipo = painel.tipoAgente
+    // Em repouso, uma linha só (clipe · campo · enviar). Com foco, texto, anexos ou o mouse em
+    // cima, ganha a barra de ferramentas embaixo: menção, comandos, para quem vai, enviar.
+    let expandido = embutido || r.focado || sobre || !r.texto.isEmpty || !r.anexos.isEmpty
     VStack(alignment: .leading, spacing: 6) {
       if embutido && r.mencaoAberta { ListaMencoes(painel: painel, embutida: true) }
+      if let perm = painel.permissao, embutido || !painel.conversa { CartaoPermissao(painel: painel, permissao: perm, compacto: embutido).padding(.bottom, 2) }
       if !r.anexos.isEmpty {
         ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: 5) { ForEach(r.anexos) { a in ChipAnexo(painel: painel, anexo: a) } }
+          HStack(alignment: .bottom, spacing: 6) { ForEach(r.anexos) { a in ChipAnexo(painel: painel, anexo: a) } }
+            .padding(.top, 4).padding(.leading, 2)
         }
       }
       HStack(alignment: .bottom, spacing: 6) {
-        BotaoMini("paperclip", "Anexar imagem, arquivo ou pasta (também ⌘V, ou arraste para o painel)") { painel.anexarPeloSeletor() }
+        if !expandido { BotaoMini("paperclip", "Anexar imagem, arquivo ou pasta (também ⌘V, ou arraste para o painel)") { painel.anexarPeloSeletor() } }
         ZStack(alignment: .topLeading) {
           if r.texto.isEmpty {
             Text(dica(tipo)).font(F.ui(13)).foregroundStyle(Cor.texto4).lineLimit(1).truncationMode(.tail)
@@ -852,40 +928,127 @@ struct ComposeView: View {
             .frame(height: r.altura)
         }
         .frame(maxWidth: .infinity)
-        if r.vazio && painel.estado == .trabalhando {
-          // Agente trabalhando e nada escrito: o botão vira "parar".
-          Button { painel.interromper() } label: {
-            Image(systemName: "stop.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(Cor.vermelho)
-              .frame(width: 26, height: 26).background(Circle().fill(Cor.vermelho.opacity(0.16))).contentShape(Circle())
-          }
-          .buttonStyle(.plain).help("Interromper o que o agente está fazendo  ⌘.")
-        } else {
-          Button { r.enviar(painel) } label: {
-            Image(systemName: "arrow.up").font(.system(size: 12, weight: .bold))
-              .foregroundStyle(r.vazio ? Cor.texto3 : Cor.sobreAcento)
-              .frame(width: 26, height: 26)
-              .background(Circle().fill(r.vazio ? Cor.vidro2 : Cor.acento))
-              .contentShape(Circle())
-          }
-          .buttonStyle(.plain).disabled(r.vazio)
-          .help("Enviar  ↩   ·   nova linha  ⇧↩   ·   histórico  ↑ ↓   ·   voltar ao terminal  esc")
-        }
+        .padding(.leading, expandido ? 6 : 0).padding(.top, expandido ? 3 : 0)
+        if !expandido { botaoEnviar(r) }
       }
-      if r.focado && !embutido {
-        Text("↩ enviar  ·  ⇧↩ nova linha  ·  @ mencionar  ·  ⌘V imagem  ·  ↑ histórico  ·  esc terminal")
-          .font(F.ui(10)).foregroundStyle(Cor.texto4).lineLimit(1).truncationMode(.tail).padding(.leading, 34)
-      }
+      if expandido { barra(r, tipo) }
     }
     .padding(.leading, 5).padding(.trailing, 6).padding(.vertical, 5)
-    .background(RoundedRectangle(cornerRadius: R.controle + 2, style: .continuous).fill(Cor.elevado))
-    .overlay(RoundedRectangle(cornerRadius: R.controle + 2, style: .continuous)
-      .strokeBorder(r.focado ? Cor.acento.opacity(0.65) : Cor.linhaForte, lineWidth: r.focado ? 1.5 : 1))
+    .background(RoundedRectangle(cornerRadius: R.cartao, style: .continuous).fill(Cor.elevado))
+    .overlay(RoundedRectangle(cornerRadius: R.cartao, style: .continuous)
+      .strokeBorder(r.focado ? Cor.acento.opacity(0.5) : Cor.linhaForte, lineWidth: r.focado ? 1.25 : 1))
+    .shadow(color: Cor.sombra.opacity(r.focado ? 0.35 : 0), radius: 10, y: 3)
+    .contentShape(Rectangle())
+    .onHover { sobre = $0 }
     .animation(.easeOut(duration: 0.12), value: r.anexos.count)
+    .animation(.easeOut(duration: 0.12), value: expandido)
+  }
+
+  /// Barra de baixo do compose expandido.
+  @ViewBuilder private func barra(_ r: Rascunho, _ tipo: String?) -> some View {
+    HStack(spacing: 2) {
+      BotaoMini("paperclip", "Anexar imagem, arquivo ou pasta  ⌥⌘A  (também ⌘V, ou arraste para o painel)") { painel.anexarPeloSeletor() }
+      BotaoMini("at", "Mencionar um agente, terminal, pasta ou arquivo  (@)") { painel.focarCompose(); painel.inserirNoCompose("@") }
+      if let f = Ferramenta.de(tipo) { MenuComandos(painel: painel, ferramenta: f) }
+      if let persona = painel.persona, tipo != nil, !r.anexos.contains(where: { $0.tipo == .destino }) {
+        HStack(spacing: 5) {
+          AvatarPersona(persona: persona, tamanho: 15, fixo: true)
+          Text("Para \(persona.nome)").lineLimit(1)
+        }
+        .font(F.ui(11.5, .medium)).foregroundStyle(Cor.texto2)
+        .padding(.leading, 5).padding(.trailing, 8).frame(height: 22)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Cor.vidro2))
+        .padding(.leading, 4)
+        .help("A mensagem vai para \(persona.nome)\(painel.estado == .trabalhando ? " — ocupado: ⌥↩ põe na fila" : ""). Para outro agente, @nome e ⌥↩.")
+      }
+      Spacer(minLength: 6)
+      if r.focado && !embutido {
+        Text("⇧↩ nova linha · ↑ histórico · esc terminal").font(F.ui(10.5)).foregroundStyle(Cor.texto4).lineLimit(1).truncationMode(.head)
+          .layoutPriority(-1)
+      }
+      botaoEnviar(r)
+    }
+  }
+
+  @ViewBuilder private func botaoEnviar(_ r: Rascunho) -> some View {
+    if r.vazio && painel.estado == .trabalhando {
+      // Agente trabalhando e nada escrito: o botão vira "parar".
+      Button { painel.interromper() } label: {
+        HStack(spacing: 5) {
+          Image(systemName: "stop.fill").font(.system(size: 9, weight: .bold))
+          if r.focado || sobre { Text("Parar").font(F.ui(11.5, .semibold)) }
+        }
+        .foregroundStyle(Cor.vermelho)
+        .padding(.horizontal, r.focado || sobre ? 10 : 0).frame(minWidth: 28, minHeight: 28)
+        .background(Capsule().fill(Cor.vermelho.opacity(0.14))).contentShape(Capsule())
+      }
+      .buttonStyle(.plain).help("Interromper o que o agente está fazendo  ⌘.  ·  clique direito: parar com motivo")
+      .contextMenu { Button("Parar com motivo…") { painel.loja.pararComMotivoPerguntando(painel) } }
+    } else {
+      Button { r.enviar(painel) } label: {
+        HStack(spacing: 5) {
+          if !r.vazio { Text("Enviar").font(F.ui(12, .semibold)); Text("↩").font(F.ui(11, .medium)).opacity(0.7) }
+          else { Image(systemName: "arrow.up").font(.system(size: 12, weight: .bold)) }
+        }
+        .foregroundStyle(r.vazio ? Cor.texto3 : Cor.sobreAcento)
+        .padding(.horizontal, r.vazio ? 0 : 11).frame(minWidth: 28, minHeight: 28)
+        .background(Capsule().fill(r.vazio ? Cor.vidro2 : Cor.acento))
+        .contentShape(Capsule())
+      }
+      .buttonStyle(.plain).disabled(r.vazio)
+      .animation(.spring(response: 0.25, dampingFraction: 0.7), value: r.vazio)
+      .help("Enviar  ↩   ·   nova linha  ⇧↩   ·   histórico  ↑ ↓   ·   voltar ao terminal  esc")
+    }
   }
 
   func dica(_ tipo: String?) -> String {
-    if let tipo { return "Escreva para \(painel.persona?.nome ?? "o " + nomeFerramenta(tipo)) — @ menciona · ⌘V ou arraste uma imagem" }
-    return "Comando ou mensagem para este terminal — @ menciona · ↩ envia"
+    if let tipo { return "Mensagem para \(painel.persona?.nome ?? "o " + nomeFerramenta(tipo))  ·  @ menciona  ·  ⌘V cola imagem" }
+    return "Comando ou mensagem para este terminal  ·  @ menciona"
+  }
+}
+
+/// Botão "/" do compose: os comandos da ferramenta (Claude Code, Codex, Gemini CLI) com o que
+/// cada um faz. Escolher põe o comando no campo, para completar ou mandar com ↩.
+struct MenuComandos: View {
+  let painel: Painel
+  let ferramenta: Ferramenta
+  @Estado private var sobre = false
+
+  static func comandos(_ id: String) -> [(String, String)] {
+    switch id {
+    case "claude":
+      return [("/clear", "Começar uma conversa nova"), ("/compact", "Resumir a conversa para liberar contexto"),
+              ("/context", "Ver quanto do contexto está em uso"), ("/model", "Trocar o modelo"),
+              ("/review", "Revisar um pull request"), ("/init", "Criar o CLAUDE.md do projeto"),
+              ("/memory", "Editar a memória (CLAUDE.md)"), ("/agents", "Gerenciar subagentes"),
+              ("/mcp", "Servidores MCP"), ("/resume", "Retomar outra conversa"), ("/usage", "Ver o uso do plano")]
+    case "codex":
+      return [("/new", "Começar uma conversa nova"), ("/compact", "Resumir a conversa para liberar contexto"),
+              ("/model", "Trocar o modelo e o esforço"), ("/review", "Revisar as mudanças"),
+              ("/diff", "Ver o diff do git"), ("/status", "Sessão, modelo e uso"), ("/init", "Criar o AGENTS.md do projeto"),
+              ("/approvals", "O que ele pode fazer sem pedir"), ("/mcp", "Servidores MCP")]
+    default:
+      return [("/clear", "Limpar a tela e o contexto"), ("/compress", "Resumir a conversa"), ("/model", "Trocar o modelo"),
+              ("/stats", "Uso da sessão"), ("/memory", "Memória (GEMINI.md)"), ("/tools", "Ferramentas disponíveis"),
+              ("/chat", "Salvar ou retomar conversas"), ("/mcp", "Servidores MCP")]
+    }
+  }
+
+  var body: some View {
+    Menu {
+      Section("Comandos do \(ferramenta.nomeLongo)") {
+        ForEach(Self.comandos(ferramenta.id), id: \.0) { c, o in
+          Button("\(c)   —   \(o)") { painel.rascunho.definir(c + " "); painel.focarCompose() }
+        }
+      }
+    } label: {
+      Image(systemName: "slash.circle").font(.system(size: 13, weight: .medium)).foregroundStyle(sobre ? Cor.texto : Cor.texto3)
+        .frame(width: 27, height: 24).background(RoundedRectangle(cornerRadius: R.pequeno, style: .continuous).fill(sobre ? Cor.vidro2 : .clear))
+        .contentShape(Rectangle())
+    }
+    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+    .onHover { sobre = $0 }
+    .help("Comandos do \(ferramenta.nomeLongo) (/clear, /compact, /model…)")
   }
 }
 
@@ -893,43 +1056,94 @@ struct ChipAnexo: View {
   let painel: Painel
   let anexo: Anexo
   @Estado private var sobre = false
+  @Estado private var previa = false
 
   var body: some View {
-    let loja = painel.loja
-    let alvo = anexo.tipo == .imagem ? nil : loja.acharPainel(anexo.valor)
-    HStack(spacing: 6) {
+    Group {
       switch anexo.tipo {
-      case .imagem:
-        if let img = Compose.miniatura(anexo.valor) {
-          Image(nsImage: img).resizable().aspectRatio(contentMode: .fill).frame(width: 24, height: 24)
-            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-        } else { Image(systemName: "photo").foregroundStyle(Cor.texto2) }
-        Text(anexo.rotulo).lineLimit(1).truncationMode(.middle).frame(maxWidth: 150)
-      case .contexto:
-        IconePrograma(processo: alvo?.tipoAgente ?? alvo?.programa ?? "shell", tamanho: 18)
-        Text("@\(anexo.rotulo)").lineLimit(1)
-        Text("contexto").foregroundStyle(Cor.texto3)
-      case .destino:
-        Image(systemName: "arrow.turn.up.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Cor.acento)
-        IconePrograma(processo: alvo?.tipoAgente ?? alvo?.programa ?? "shell", tamanho: 18)
-        Text("para @\(anexo.rotulo)").lineLimit(1)
+      case .imagem, .arquivo: cartao
+      case .contexto, .destino: chip
       }
-      Button { painel.rascunho.anexos.removeAll { $0.id == anexo.id } } label: {
+    }
+    .onHover { sobre = $0 }
+    .help(ajuda)
+  }
+
+  private func remover() { painel.rascunho.anexos.removeAll { $0.id == anexo.id } }
+
+  private var botaoRemover: some View {
+    Button(action: remover) {
+      Image(systemName: "xmark").font(.system(size: 7.5, weight: .bold)).foregroundStyle(.white)
+        .frame(width: 16, height: 16).background(Circle().fill(Color.black.opacity(0.65)))
+        .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: 0.5))
+    }
+    .buttonStyle(.plain).help("Remover anexo")
+  }
+
+  /// Imagem ou arquivo: cartão com miniatura; clique abre a prévia grande.
+  @ViewBuilder private var cartao: some View {
+    let caminho = anexo.valor
+    Group {
+      if anexo.tipo == .imagem {
+        MiniaturaArquivo(caminho: caminho, lado: 52)
+          .frame(width: 52, height: 52)
+          .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+          .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Cor.linhaForte))
+      } else {
+        HStack(spacing: 8) {
+          MiniaturaArquivo(caminho: caminho, lado: 34).frame(width: 34, height: 34)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(anexo.rotulo).font(F.ui(12, .medium)).foregroundStyle(Cor.texto).lineLimit(1).truncationMode(.middle)
+            Text(Arquivos.descricao(caminho)).font(F.ui(10.5)).foregroundStyle(Cor.texto3).lineLimit(1)
+          }
+          .frame(maxWidth: 150, alignment: .leading)
+        }
+        .padding(.leading, 8).padding(.trailing, 12).frame(height: 52)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Cor.vidro2))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Cor.linha))
+      }
+    }
+    .brightness(sobre ? (Cor.claro ? -0.03 : 0.04) : 0)
+    .contentShape(Rectangle())
+    .onTapGesture { previa = true }
+    .overlay(alignment: .topTrailing) { if sobre { botaoRemover.offset(x: 5, y: -5) } }
+    .padding(.top, 5).padding(.trailing, 5)
+    .popover(isPresented: $previa, arrowEdge: .top) { PreviaArquivo(caminho: caminho) { remover(); previa = false } }
+    .contextMenu {
+      Button("Ver prévia") { previa = true }
+      Button("Abrir") { NSWorkspace.shared.open(URL(fileURLWithPath: caminho)) }
+      Button("Mostrar no Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: caminho)]) }
+      Button("Copiar caminho") { painel.loja.copiar(caminho) }
+      Divider()
+      Button("Remover anexo", role: .destructive, action: remover)
+    }
+  }
+
+  /// Contexto de outro terminal ou destino da mensagem: etiqueta pequena.
+  private var chip: some View {
+    let alvo = painel.loja.acharPainel(anexo.valor)
+    return HStack(spacing: 6) {
+      if anexo.tipo == .destino {
+        Image(systemName: "arrow.turn.up.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Cor.acento)
+      }
+      IconePrograma(processo: alvo?.tipoAgente ?? alvo?.programa ?? "shell", tamanho: 18)
+      if anexo.tipo == .destino { Text("para @\(anexo.rotulo)").lineLimit(1) }
+      else { Text("@\(anexo.rotulo)").lineLimit(1); Text("contexto").foregroundStyle(Cor.texto3) }
+      Button(action: remover) {
         Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(Cor.texto2)
           .frame(width: 16, height: 16).background(Circle().fill(sobre ? Cor.vidro2 : .clear))
       }.buttonStyle(.plain).help("Remover")
     }
     .font(F.ui(11.5, .medium)).foregroundStyle(Cor.texto)
-    .padding(.leading, anexo.tipo == .imagem ? 3 : 7).padding(.trailing, 4).frame(height: 30)
+    .padding(.leading, 7).padding(.trailing, 4).frame(height: 30)
     .background(RoundedRectangle(cornerRadius: R.pequeno + 1, style: .continuous).fill(anexo.tipo == .destino ? Cor.acento.opacity(0.12) : Cor.vidro2))
     .overlay(RoundedRectangle(cornerRadius: R.pequeno + 1, style: .continuous).strokeBorder(anexo.tipo == .destino ? Cor.acento.opacity(0.4) : Cor.linha))
-    .onHover { sobre = $0 }
-    .help(ajuda)
   }
 
   var ajuda: String {
     switch anexo.tipo {
-    case .imagem: return anexo.valor
+    case .imagem: return "\(anexo.valor)\nClique para ver a prévia"
+    case .arquivo: return "\(anexo.valor)\nVai na mensagem como @caminho · clique para ver a prévia"
     case .contexto: return "A tela recente / o último resultado deste terminal vai junto com a mensagem"
     case .destino: return "A mensagem é enviada para este terminal (em vez deste painel)"
     }
