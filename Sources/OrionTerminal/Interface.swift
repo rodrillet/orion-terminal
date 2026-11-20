@@ -14,18 +14,20 @@ struct JanelaRaiz: View {
     let larguraLateral = min(loja.larguraArrasto ?? loja.ajustes.larguraLateral, max(170, largura * 0.38 - 60))
     ZStack(alignment: .bottomTrailing) {
       Fundo(loja: loja)
-      VStack(spacing: 0) {
-        BarraTopo(loja: loja, largura: largura)
-        HStack(spacing: 0) {
-          if lateral {
-            TrilhoNav(loja: loja)
-            BarraLateral(loja: loja).frame(width: larguraLateral)
-            AlcaLateral(loja: loja)
-          }
-          // Sem a barra de agentes, a doca flutua sobre a área: os painéis deixam espaço para ela.
-          AreaRepresentavel(area: area, esquerda: lateral ? 4 : 12, baixo: loja.ajustes.barraAgentes ? 6 : (loja.ajustes.doca ? 60 : 12))
+      // Duas colunas, como no Orion Chat: a lateral na altura toda (com os botões da janela no alto)
+      // e, à direita, o cabeçalho do agente em foco, os terminais e a barra de agentes.
+      HStack(spacing: 0) {
+        if lateral {
+          ColunaLateral(loja: loja).frame(width: larguraLateral + 52)
+            .overlay(alignment: .trailing) { AlcaLateral(loja: loja).offset(x: 4.5) }
+            .zIndex(1)
         }
-        if loja.ajustes.barraAgentes { BarraAgentes(loja: loja, largura: largura) }
+        VStack(spacing: 0) {
+          BarraTopo(loja: loja, largura: largura)
+          // Sem a barra de agentes, a doca flutua sobre a área: os painéis deixam espaço para ela.
+          AreaRepresentavel(area: area, esquerda: 12, baixo: loja.ajustes.barraAgentes ? 6 : (loja.ajustes.doca ? 60 : 12))
+          if loja.ajustes.barraAgentes { BarraAgentes(loja: loja, largura: largura) }
+        }
       }
       if loja.ajustes.doca { Doca(loja: loja, compacta: largura < 900).padding(.trailing, 12).padding(.bottom, loja.ajustes.barraAgentes ? 5 : 10) }
       if loja.quadroAberto {
@@ -69,10 +71,10 @@ struct AreaRepresentavel: NSViewRepresentable {
 struct Fundo: View {
   let loja: Loja
   /// Cor de fundo da interface (para contornos que "recortam" um ponto sobre o avatar).
-  static var cor: Color { let _ = Aparencia.atual.versao; return Tema.atual.janelaUI }
+  static var cor: Color { let _ = Aparencia.atual.versao; return Tema.atual.lateralUI }
   var body: some View {
     let _ = Aparencia.atual.versao
-    loja.tema.janelaUI.opacity(loja.opacidade)
+    loja.tema.areaUI.opacity(loja.opacidade)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .clipShape(RoundedRectangle(cornerRadius: loja.telaCheia ? 0 : 12, style: .continuous))
   }
@@ -269,45 +271,76 @@ struct BarraTopo: View {
     let lateral = loja.ajustes.barraLateral
     let apertado = largura < 980, minimo = largura < 840
     HStack(spacing: minimo ? 6 : 8) {
-      Color.clear.frame(width: loja.telaCheia ? 6 : 76, height: 1)
-      SeletorWorkspace(loja: loja, compacta: minimo)
-      Capsula {
-        BotaoIcone("sidebar.left", dica: lateral ? "Esconder a barra lateral  ⌘B" : "Mostrar a barra lateral  ⌘B", ativo: lateral) { loja.ajustes.barraLateral.toggle() }
-        if !minimo { BotaoIcone("command", dica: "Paleta de comandos  ⌘P") { loja.paletaAberta.toggle() } }
+      if !lateral {
+        Color.clear.frame(width: loja.telaCheia ? 6 : 76, height: 1)
+        BotaoIcone("sidebar.left", dica: "Mostrar a barra lateral  ⌘B", tamanho: 14) { loja.ajustes.barraLateral = true }
+        SeletorWorkspace(loja: loja, compacta: minimo)
+        AbasCompactas(loja: loja)
+      } else {
+        TituloWorkspace(loja: loja, compacta: apertado)
+        Spacer(minLength: 0)
       }
       if !apertado {
         Capsula {
-          BotaoIcone("chevron.left", dica: "Voltar para a aba visitada antes  ⌥⌘[") { loja.navegarVisita(-1) }
-          BotaoIcone("chevron.right", dica: "Avançar para a aba visitada depois  ⌥⌘]") { loja.navegarVisita(1) }
+          BotaoIcone("chevron.left", dica: "Voltar para a aba visitada antes  ⌥⌘[", tamanho: 13) { loja.navegarVisita(-1) }
+          BotaoIcone("chevron.right", dica: "Avançar para a aba visitada depois  ⌥⌘]", tamanho: 13) { loja.navegarVisita(1) }
         }
       }
-      if !lateral { AbasCompactas(loja: loja) } else { Spacer(minLength: 0) }
       BotaoAtualizacao()
       ForEach(loja.ferramentas) { f in ChipFerramenta(loja: loja, tipo: f.id, compacto: apertado) }
       Capsula {
-        // Com a barra lateral à mostra, quadro, histórico, notificações e ajustes moram no trilho.
+        // Com a barra lateral à mostra, quadro, histórico, notificações e ajustes moram nela.
         if !lateral {
           BotaoIcone("square.grid.2x2", dica: "Quadro de agentes  ⇧⌘A\(c.esperando > 0 ? " — \(c.esperando) esperando você" : "")",
-                     selo: c.esperando, ativo: loja.quadroAberto) { loja.abrirQuadro() }
+                     selo: c.esperando, tamanho: 14, ativo: loja.quadroAberto) { loja.abrirQuadro() }
           if !loja.fechados.isEmpty && !minimo {
-            BotaoIcone("clock.arrow.circlepath", dica: "Agentes fechados há pouco — reabrir com a mesma conversa  ⌥⌘Z") { fechados.toggle() }
+            BotaoIcone("clock.arrow.circlepath", dica: "Agentes fechados há pouco — reabrir com a mesma conversa  ⌥⌘Z", tamanho: 14) { fechados.toggle() }
               .popover(isPresented: $fechados, arrowEdge: .bottom) { ListaFechados(loja: loja, aberto: $fechados) }
               .onChange(of: loja.pedirFechados) { _, _ in fechados = true }
           }
-          BotaoIcone("bell", dica: "Notificações", selo: loja.naoLidas) { notificacoes.toggle(); loja.naoLidas = 0 }
+          BotaoIcone("bell", dica: "Notificações", selo: loja.naoLidas, tamanho: 14) { notificacoes.toggle(); loja.naoLidas = 0 }
             .popover(isPresented: $notificacoes, arrowEdge: .bottom) { ListaNotificacoes(loja: loja, aberto: $notificacoes) }
         }
-        BotaoIcone("plus", dica: "Novo terminal  ⌘T   ·   ⌥ clique: novo agente com opções  ⌥⌘N") {
+        if !minimo { BotaoIcone("command", dica: "Paleta de comandos  ⌘P", tamanho: 14) { loja.paletaAberta.toggle() } }
+        BotaoIcone("plus", dica: "Novo terminal  ⌘T   ·   ⌥ clique: novo agente com opções  ⌥⌘N", tamanho: 14) {
           if NSEvent.modifierFlags.contains(.option) { loja.novoAgentePerguntando() } else { loja.criarAba() }
         }
-        if !lateral { BotaoIcone("slider.horizontal.3", dica: "Ajustes  ⌘,") { (NSApp.delegate as? Delegado)?.abrirAjustes() } }
+        if !lateral { BotaoIcone("slider.horizontal.3", dica: "Ajustes  ⌘,", tamanho: 14) { (NSApp.delegate as? Delegado)?.abrirAjustes() } }
       }
       .onChange(of: loja.fecharPopovers) { _, _ in fechados = false; notificacoes = false }
     }
-    .padding(.trailing, 12)
+    .padding(.leading, lateral ? 16 : 0).padding(.trailing, 12)
     .frame(height: 52)
     .background(Color.white.opacity(0.0001).gesture(WindowDragGesture()))
     .onTapGesture(count: 2) { loja.janela?.zoom(nil) }
+  }
+}
+
+/// Título da coluna da direita: o workspace e um resumo de uma linha ("5 agentes · 1 esperando
+/// você · ~/pasta"). Quem está em foco já aparece no cabeçalho do próprio painel.
+struct TituloWorkspace: View {
+  @Bindable var loja: Loja
+  var compacta = false
+
+  var body: some View {
+    if let w = loja.workspaceAtivo {
+      let abas = loja.abas(de: w)
+      let agentes = abas.filter { loja.painelPrincipal($0)?.tipoAgente != nil }.count
+      let c = loja.contagem(w)
+      HStack(spacing: 8) {
+        Text(w.nome).font(F.ui(14, .semibold)).foregroundStyle(Cor.texto).lineLimit(1).fixedSize()
+        HStack(spacing: 5) {
+          Text(agentes == 0 ? "\(abas.count) aba\(abas.count == 1 ? "" : "s")" : "\(agentes) agente\(agentes == 1 ? "" : "s")")
+          if c.esperando > 0 { Text("·").foregroundStyle(Cor.texto4); Text("\(c.esperando) esperando você").foregroundStyle(Cor.ambar) }
+          if c.trabalhando > 0 { Text("·").foregroundStyle(Cor.texto4); Text("\(c.trabalhando) trabalhando").foregroundStyle(Cor.verde) }
+        }
+        .font(F.ui(12.5)).foregroundStyle(Cor.texto3).lineLimit(1).fixedSize()
+        if !compacta {
+          Text(Loja.encurtar(w.pasta)).font(F.mono(11.5)).foregroundStyle(Cor.texto3).lineLimit(1).truncationMode(.head).layoutPriority(-1)
+        }
+      }
+      .help("Workspace \(w.nome) — \(Loja.encurtar(w.pasta))")
+    }
   }
 }
 

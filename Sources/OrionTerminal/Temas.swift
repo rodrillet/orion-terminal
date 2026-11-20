@@ -15,14 +15,17 @@ struct Tema: Identifiable, Equatable, Codable {
   var ansi: [String]
   /// Opacidade própria do tema (nil = a dos ajustes).
   var opacidade: Double?
+  /// Barra lateral e área em volta dos terminais (nil = derivadas do fundo).
+  var lateral: String?
+  var area: String?
 
   init(id: String, nome: String, claro: Bool = false, fundo: String, texto: String, acento: String, ansi: [String],
-       opacidade: Double? = nil) {
+       opacidade: Double? = nil, lateral: String? = nil, area: String? = nil) {
     self.id = id; self.nome = nome; self.claro = claro; self.fundo = fundo; self.texto = texto
-    self.acento = acento; self.ansi = ansi; self.opacidade = opacidade
+    self.acento = acento; self.ansi = ansi; self.opacidade = opacidade; self.lateral = lateral; self.area = area
   }
 
-  enum Chaves: String, CodingKey { case id, nome, claro, fundo, texto, acento, ansi, opacidade }
+  enum Chaves: String, CodingKey { case id, nome, claro, fundo, texto, acento, ansi, opacidade, lateral, area }
 
   /// Leitura tolerante (arquivo importado ou editado à mão): o que faltar volta ao tema Orion.
   init(from d: Decoder) throws {
@@ -38,6 +41,8 @@ struct Tema: Identifiable, Equatable, Codable {
     if cores.count < 16 { cores += base.ansi[cores.count...] }
     ansi = Array(cores.prefix(16))
     opacidade = (try? c.decodeIfPresent(Double.self, forKey: .opacidade)).flatMap { $0 }.map { min(1, max(0.2, $0)) }
+    lateral = Tema.hexValido(try? c.decode(String.self, forKey: .lateral))
+    area = Tema.hexValido(try? c.decode(String.self, forKey: .area))
   }
 
   func encode(to e: Encoder) throws {
@@ -46,6 +51,8 @@ struct Tema: Identifiable, Equatable, Codable {
     try c.encode(fundo, forKey: .fundo); try c.encode(texto, forKey: .texto); try c.encode(acento, forKey: .acento)
     try c.encode(ansi, forKey: .ansi)
     try c.encodeIfPresent(opacidade, forKey: .opacidade)
+    try c.encodeIfPresent(lateral, forKey: .lateral)
+    try c.encodeIfPresent(area, forKey: .area)
   }
 
   static func hexValido(_ s: String?) -> String? {
@@ -65,6 +72,12 @@ struct Tema: Identifiable, Equatable, Codable {
   /// parecerem cartões pousados sobre ela.
   var corJanela: NSColor { corFundo.blended(withFraction: claro ? 0.045 : 0.30, of: .black) ?? corFundo }
   var janelaUI: SwiftUI.Color { SwiftUI.Color(nsColor: corJanela) }
+  /// Barra lateral: o degrau mais fundo da janela.
+  var corLateral: NSColor { lateral.map { NSColor(hex: $0) } ?? corJanela }
+  /// Área da direita, onde pousam os cartões dos terminais: meio caminho entre a lateral e o terminal.
+  var corArea: NSColor { area.map { NSColor(hex: $0) } ?? (corJanela.blended(withFraction: 0.45, of: corFundo) ?? corJanela) }
+  var lateralUI: SwiftUI.Color { SwiftUI.Color(nsColor: corLateral) }
+  var areaUI: SwiftUI.Color { SwiftUI.Color(nsColor: corArea) }
 
   var coresTerminal: [SwiftTerm.Color] {
     ansi.map { h in
@@ -76,7 +89,13 @@ struct Tema: Identifiable, Equatable, Codable {
   // MARK: - Temas que vêm com o app
 
   static let embutidos: [Tema] = [
-    Tema(id: "orion", nome: "Orion", fundo: "#0b0b10", texto: "#e8e8ee", acento: "#ff9e66",
+    // Orion: a paleta do Orion Chat — lateral num papel noturno levemente violeta, área um degrau acima,
+    // terminal como poço; violeta só no que é do agente (cursor, seleção, destaque).
+    Tema(id: "orion", nome: "Orion", fundo: "#0f0f0e", texto: "#e9e9e4", acento: "#a688f7",
+         ansi: ["#1c1c1b", "#f08a80", "#5fc48a", "#e0a84a", "#7db3f5", "#c4acfb", "#5cc4ea", "#d6d6d2",
+                "#71716c", "#f7aaa2", "#86d9a8", "#edc27a", "#a9cdfb", "#d9c9fd", "#8ed8f2", "#fafaf7"],
+         lateral: "#0d0c12", area: "#181817"),
+    Tema(id: "orion-classico", nome: "Orion Clássico", fundo: "#0b0b10", texto: "#e8e8ee", acento: "#ff9e66",
          ansi: ["#1d1d24", "#ff6b6b", "#9ee37d", "#f5d76e", "#7aa2ff", "#c792ea", "#6fd6d6", "#c8c8d0",
                 "#5c5c68", "#ff8a8a", "#b5f09a", "#ffe58f", "#9cbcff", "#dbb2ff", "#8ef0f0", "#ffffff"]),
     Tema(id: "hub", nome: "Orion Hub", fundo: "#1a1a1a", texto: "#f0f0f0", acento: "#42a0ff",
@@ -110,7 +129,11 @@ struct Tema: Identifiable, Equatable, Codable {
          ansi: ["#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
                 "#586e75", "#cb4b16", "#98ad0c", "#c99c12", "#4a9fe0", "#6c71c4", "#3cb8ae", "#fdf6e3"]),
     // Claros
-    Tema(id: "orion-claro", nome: "Orion Claro", claro: true, fundo: "#fcfcfd", texto: "#1c2026", acento: "#1f6fe5",
+    Tema(id: "orion-claro", nome: "Orion Claro", claro: true, fundo: "#ffffff", texto: "#151514", acento: "#6e45d1",
+         ansi: ["#151514", "#b42a20", "#1f7a45", "#9a5b00", "#0063d1", "#6e45d1", "#0a6f9e", "#6f6f6a",
+                "#5c5c58", "#d43a2f", "#238049", "#a56405", "#2470cf", "#7a52e0", "#0d7aab", "#3a3a38"],
+         lateral: "#f5f4f9", area: "#fbfbfa"),
+    Tema(id: "orion-classico-claro", nome: "Orion Clássico Claro", claro: true, fundo: "#fcfcfd", texto: "#1c2026", acento: "#1f6fe5",
          ansi: ["#1c2026", "#c4313f", "#2b7d4f", "#9a6b00", "#1f6fe5", "#8a46c8", "#0f7f8f", "#6b7785",
                 "#4a5561", "#d9485a", "#33935d", "#b07e09", "#3b82f6", "#a05fe0", "#1697a8", "#12161b"]),
     Tema(id: "papel", nome: "Papel", claro: true, fundo: "#f6f3ec", texto: "#2a2723", acento: "#c2562c",
@@ -249,6 +272,11 @@ enum Cor {
   }
   private static func par(_ escuro: String, _ claro: String) -> SwiftUI.Color { SwiftUI.Color(hex: t.claro ? claro : escuro) }
 
+  /// Barra lateral e área dos terminais (layout de duas colunas).
+  static var lateral: SwiftUI.Color { t.lateralUI }
+  static var area: SwiftUI.Color { t.areaUI }
+  /// Item escolhido na lateral: um degrau de tinta sobre o papel dela.
+  static var escolhido: SwiftUI.Color { tinta(0.10, 0.075) }
   /// Cor de destaque do tema (seleção, botões ativos).
   static var acento: SwiftUI.Color { t.acentoUI }
   /// Texto sobre um botão preenchido com o destaque.
@@ -271,10 +299,10 @@ enum Cor {
   /// Véu atrás de um painel flutuante.
   static var veu: SwiftUI.Color { SwiftUI.Color.black.opacity(t.claro ? 0.16 : 0.36) }
   static var sombra: SwiftUI.Color { SwiftUI.Color.black.opacity(t.claro ? 0.16 : 0.5) }
-  static var verde: SwiftUI.Color { par("#8fdc6e", "#2f8f4e") }
+  static var verde: SwiftUI.Color { par("#5fc48a", "#1f7a45") }
   static var amarelo: SwiftUI.Color { par("#f5d76e", "#a67700") }
-  static var ambar: SwiftUI.Color { par("#ffb454", "#c26a00") }      // "esperando você"
-  static var vermelho: SwiftUI.Color { par("#ff6b6b", "#cf3a35") }
+  static var ambar: SwiftUI.Color { par("#e0a84a", "#9a5b00") }      // "esperando você"
+  static var vermelho: SwiftUI.Color { par("#f08a80", "#b42a20") }
   static var azul: SwiftUI.Color { par("#7aa2ff", "#1f6fe5") }
   static var lilas: SwiftUI.Color { par("#b3b6ff", "#6b45b8") }
   static let paletaGrupos = ["#ff9e66", "#ff6b6b", "#f5d76e", "#9ee37d", "#6fd6d6", "#7aa2ff", "#b79cff", "#ff79c6", "#a0a0aa"]

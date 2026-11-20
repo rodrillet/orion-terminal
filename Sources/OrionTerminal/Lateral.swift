@@ -1,13 +1,43 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Trilho de navegação
+// MARK: - Coluna lateral
 //
-// Coluna fina à esquerda, só com ícones de traço: o que a barra lateral mostra (agentes ou
-// histórico) e o que abre por cima (quadro, portas, notificações, ajustes). Os workspaces moram
-// no seletor do topo.
+// A barra lateral ocupa a altura toda da janela, como no Orion Chat: no alto a faixa dos botões
+// da janela, a busca ("Buscar ou ir para…", ⌘P abre a paleta), a navegação (quem espera você,
+// quadro, histórico, caixa, portas, notificações), as listas do workspace e, no rodapé, o
+// workspace com os ajustes.
 
-struct TrilhoNav: View {
+struct ColunaLateral: View {
+  @Bindable var loja: Loja
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 2) {
+        Spacer(minLength: 0)
+        BotaoIcone("sidebar.left", dica: "Esconder a barra lateral  ⌘B", tamanho: 14) { loja.ajustes.barraLateral = false }
+      }
+      .padding(.leading, loja.telaCheia ? 0 : 76)
+      .frame(height: 52)
+      .background(Color.white.opacity(0.0001).gesture(WindowDragGesture()))
+      .onTapGesture(count: 2) { loja.janela?.zoom(nil) }
+      CampoBusca(texto: $loja.filtro, dica: loja.modoLateral == "historico" ? "Buscar no histórico" : "Buscar ou ir para…") {
+        loja.paletaAberta.toggle()
+      }
+      .padding(.bottom, 10)
+      NavLateral(loja: loja)
+      BarraLateral(loja: loja).padding(.top, 14)
+      RodapeLateral(loja: loja)
+    }
+    .padding(.horizontal, 10)
+    .frame(maxHeight: .infinity, alignment: .top)
+    .background(Cor.lateral.opacity(loja.opacidade))
+    .overlay(alignment: .trailing) { Rectangle().fill(Cor.linha).frame(width: 1) }
+  }
+}
+
+/// Os destinos fixos da lateral: uma linha com ícone de traço, nome e contagem.
+struct NavLateral: View {
   @Bindable var loja: Loja
   @Estado private var portas = false
   @Estado private var notificacoes = false
@@ -15,57 +45,90 @@ struct TrilhoNav: View {
 
   var body: some View {
     let c = loja.contagem()
+    let esperando = loja.workspaceAtivo.map { loja.esperandoVoce($0) } ?? []
+    let permissoes = esperando.filter { $0.permissao != nil }.count
     let minhasPortas = loja.portas.filter { $0.painel != nil }.count
-    VStack(spacing: 6) {
-      BotaoTrilho(simbolo: "bubble.left.and.bubble.right", dica: "Agentes e terminais deste workspace",
-                  ativo: loja.modoLateral == "agentes" && !loja.quadroAberto) { loja.modoLateral = "agentes"; loja.abrirQuadro(false) }
-      BotaoTrilho(simbolo: "square.grid.2x2", dica: "Quadro de agentes  ⇧⌘A\(c.esperando > 0 ? " — \(c.esperando) esperando você" : "")",
-                  selo: c.esperando, ativo: loja.quadroAberto) { loja.abrirQuadro() }
-      BotaoTrilho(simbolo: "clock.arrow.circlepath", dica: "Histórico: agentes fechados, para reabrir com a mesma conversa  ⌥⌘Z",
-                  ativo: loja.modoLateral == "historico" && !loja.quadroAberto) {
+    let naFila = loja.caixa.filter { $0.estado == .naFila }.count
+    VStack(spacing: 1) {
+      LinhaNav(simbolo: permissoes > 0 ? "hand.raised" : "clock", titulo: "Esperando você",
+               detalhe: permissoes > 0 ? "\(permissoes) pede\(permissoes == 1 ? "" : "m") permissão" : nil,
+               total: esperando.count, corTotal: Cor.ambar, dica: "Ir para o próximo agente que espera você  ⌘J") { loja.irParaProximoEsperando() }
+      LinhaNav(simbolo: "square.grid.2x2", titulo: "Quadro", total: c.trabalhando + c.esperando, ativo: loja.quadroAberto,
+               dica: "Quadro de agentes  ⇧⌘A") { loja.abrirQuadro() }
+      LinhaNav(simbolo: "clock.arrow.circlepath", titulo: "Histórico", ativo: loja.modoLateral == "historico" && !loja.quadroAberto,
+               dica: "Agentes fechados, para reabrir com a mesma conversa  ⌥⌘Z") {
         loja.modoLateral = loja.modoLateral == "historico" ? "agentes" : "historico"; loja.abrirQuadro(false)
       }
-      BotaoTrilho(simbolo: "tray", dica: "Caixa de entrada dos agentes: mensagens na fila, entregues e respondidas",
-                  selo: loja.caixa.filter { $0.estado == .naFila }.count, corSelo: Cor.acento, ativo: caixa) { caixa.toggle() }
+      LinhaNav(simbolo: "tray", titulo: "Caixa de entrada", total: naFila, corTotal: Cor.acento, ativo: caixa,
+               dica: "Mensagens dos agentes: na fila, entregues e respondidas") { caixa.toggle() }
         .popover(isPresented: $caixa, arrowEdge: .trailing) { ListaCaixa(loja: loja) }
-      BotaoTrilho(simbolo: "network", dica: "Portas em uso  ⌥⌘P", selo: minhasPortas, corSelo: Cor.verde, ativo: portas) {
+      LinhaNav(simbolo: "network", titulo: "Portas", total: minhasPortas, corTotal: Cor.verde, ativo: portas, dica: "Portas em uso  ⌥⌘P") {
         portas.toggle(); if portas { loja.atualizarPortas() }
       }
       .popover(isPresented: $portas, arrowEdge: .trailing) { ListaPortas(loja: loja, aberto: $portas) }
-      BotaoTrilho(simbolo: "bell", dica: "Notificações", selo: loja.naoLidas, ativo: notificacoes) { notificacoes.toggle(); loja.naoLidas = 0 }
-        .popover(isPresented: $notificacoes, arrowEdge: .trailing) { ListaNotificacoes(loja: loja, aberto: $notificacoes) }
-      Spacer(minLength: 8)
-      BotaoTrilho(simbolo: "gearshape", dica: "Ajustes  ⌘,") { (NSApp.delegate as? Delegado)?.abrirAjustes() }
+      LinhaNav(simbolo: "bell", titulo: "Notificações", total: loja.naoLidas, corTotal: Cor.acento, ativo: notificacoes, dica: "Notificações") {
+        notificacoes.toggle(); loja.naoLidas = 0
+      }
+      .popover(isPresented: $notificacoes, arrowEdge: .trailing) { ListaNotificacoes(loja: loja, aberto: $notificacoes) }
     }
-    .padding(.top, 4).padding(.bottom, 12)
-    .frame(width: 52)
     .onChange(of: loja.pedirFechados) { _, _ in loja.modoLateral = "historico" }
     .onChange(of: loja.fecharPopovers) { _, _ in portas = false; notificacoes = false; caixa = false }
   }
 }
 
-struct BotaoTrilho: View {
+struct LinhaNav: View {
   let simbolo: String
-  let dica: String
-  var selo = 0
-  var corSelo: Color = Cor.ambar
+  let titulo: String
+  var detalhe: String? = nil
+  var total = 0
+  var corTotal: Color? = nil
   var ativo = false
+  let dica: String
   let acao: () -> Void
   @Estado private var sobre = false
 
   var body: some View {
     Button(action: acao) {
-      Image(systemName: simbolo)
-        .font(.system(size: 15, weight: .regular))
-        .foregroundStyle(ativo ? Cor.texto : (sobre ? Cor.texto2 : Cor.texto3))
-        .frame(width: 34, height: 34)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(ativo ? Cor.vidro2 : (sobre ? Cor.vidro : .clear)))
-        .overlay(alignment: .topTrailing) { if selo > 0 { Selo(numero: selo, cor: corSelo).scaleEffect(0.86).offset(x: 3, y: -2) } }
-        .contentShape(Rectangle())
+      HStack(spacing: 10) {
+        Image(systemName: simbolo).font(.system(size: 13, weight: .regular)).frame(width: 18)
+          .foregroundStyle(ativo ? Cor.texto : Cor.texto2)
+        Text(titulo).font(F.ui(13)).foregroundStyle(Cor.texto).lineLimit(1)
+        if let detalhe { Text(detalhe).font(F.ui(11)).foregroundStyle(Cor.ambar).lineLimit(1) }
+        Spacer(minLength: 4)
+        if total > 0 {
+          if let corTotal {
+            Text(total > 99 ? "99+" : "\(total)").font(.system(size: 10.5, weight: .bold)).monospacedDigit()
+              .foregroundStyle(Cor.claro ? .white : .black)
+              .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18).background(Capsule().fill(corTotal))
+          } else {
+            Text("\(total)").font(F.ui(11.5, .medium)).monospacedDigit().foregroundStyle(Cor.texto3)
+          }
+        }
+      }
+      .padding(.horizontal, 8).frame(height: F.m(30))
+      .background(RoundedRectangle(cornerRadius: R.controle, style: .continuous).fill(ativo ? Cor.escolhido : (sobre ? Cor.vidro : .clear)))
+      .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
     .onHover { sobre = $0 }
     .help(dica)
+  }
+}
+
+/// Rodapé da lateral: o workspace em uso (um clique troca) e os ajustes.
+struct RodapeLateral: View {
+  @Bindable var loja: Loja
+  var body: some View {
+    VStack(spacing: 0) {
+      Rectangle().fill(Cor.linha).frame(height: 1)
+      HStack(spacing: 4) {
+        SeletorWorkspace(loja: loja, comDetalhe: true)
+        Spacer(minLength: 0)
+        BotaoIcone("slider.horizontal.3", dica: "Ajustes  ⌘,", tamanho: 13) { (NSApp.delegate as? Delegado)?.abrirAjustes() }
+      }
+      .padding(.top, 8)
+    }
+    .padding(.bottom, 10)
   }
 }
 
@@ -74,6 +137,8 @@ struct BotaoTrilho: View {
 struct SeletorWorkspace: View {
   @Bindable var loja: Loja
   var compacta = false
+  /// No rodapé da lateral: nome em cima, pasta e quantos agentes embaixo; o menu abre para cima.
+  var comDetalhe = false
   @Estado private var aberto = false
   @Estado private var sobre = false
 
@@ -82,19 +147,29 @@ struct SeletorWorkspace: View {
       let outros = loja.workspaces.filter { $0.id != w.id }.reduce(0) { $0 + loja.contagem($1).esperando }
       Button { aberto.toggle() } label: {
         HStack(spacing: 8) {
-          SimboloWorkspace(ws: w, tamanho: 22)
-          Text(w.nome).font(F.ui(13.5, .semibold)).foregroundStyle(Cor.texto).lineLimit(1).frame(maxWidth: compacta ? 90 : 150, alignment: .leading)
+          SimboloWorkspace(ws: w, tamanho: comDetalhe ? 28 : 22)
+          if comDetalhe {
+            let n = loja.abas(de: w).count
+            VStack(alignment: .leading, spacing: 1) {
+              Text(w.nome).font(F.ui(13, .semibold)).foregroundStyle(Cor.texto).lineLimit(1)
+              Text("\((w.pasta as NSString).lastPathComponent) · \(n == 0 ? "vazio" : "\(n) aba\(n == 1 ? "" : "s")")")
+                .font(F.ui(11)).foregroundStyle(Cor.texto3).lineLimit(1)
+            }
+            .frame(maxWidth: 170, alignment: .leading)
+          } else {
+            Text(w.nome).font(F.ui(13.5, .semibold)).foregroundStyle(Cor.texto).lineLimit(1).frame(maxWidth: compacta ? 90 : 150, alignment: .leading)
+          }
           if outros > 0 { Circle().fill(Cor.ambar).frame(width: 6, height: 6).help("\(outros) agente\(outros == 1 ? "" : "s") esperando você em outro workspace") }
           Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Cor.texto3)
         }
-        .padding(.leading, 5).padding(.trailing, 9).frame(height: 32)
+        .padding(.leading, 5).padding(.trailing, 9).frame(height: comDetalhe ? 40 : 32)
         .background(RoundedRectangle(cornerRadius: R.controle + 1, style: .continuous).fill(aberto ? Cor.vidro2 : (sobre ? Cor.vidro : .clear)))
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain).fixedSize()
       .onHover { sobre = $0 }
       .help("Workspace: \(w.nome) — clique para trocar  ·  ⌃1…9 troca direto")
-      .popover(isPresented: $aberto, arrowEdge: .bottom) { ListaWorkspaces(loja: loja, aberto: $aberto) }
+      .popover(isPresented: $aberto, arrowEdge: comDetalhe ? .top : .bottom) { ListaWorkspaces(loja: loja, aberto: $aberto) }
       .onChange(of: loja.fecharPopovers) { _, _ in aberto = false }
       .onChange(of: loja.pedirWorkspaces) { _, _ in aberto = true }
     }
@@ -228,10 +303,9 @@ struct BarraLateral: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      CampoBusca(texto: $loja.filtro, dica: loja.modoLateral == "historico" ? "Buscar no histórico" : "Buscar agente")
       if loja.modoLateral == "historico" { HistoricoLateral(loja: loja) } else { listaAgentes }
     }
-    .padding(.leading, 2).padding(.trailing, 4).padding(.bottom, 10)
+    .frame(maxHeight: .infinity, alignment: .top)
     .animation(.easeOut(duration: 0.16), value: loja.workspaceAtivoID)
     .animation(.easeOut(duration: 0.14), value: loja.modoLateral)
   }
@@ -248,8 +322,6 @@ struct BarraLateral: View {
       // Com filtro, nada fica recolhido (senão a busca esconderia o que achou).
       let recolherAgentes = agentesRecolhidos && loja.filtro.isEmpty
       let recolherTerminais = terminaisRecolhidos && loja.filtro.isEmpty
-      let esperando = loja.esperandoVoce(w)
-      if !esperando.isEmpty && loja.filtro.isEmpty { AvisoEsperando(loja: loja, lista: esperando) }
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 2) {
           TituloSecao(titulo: "Agentes", total: agentes.count, recolhido: $agentesRecolhidos) { MenuNovo(loja: loja, ws: w, soAgentes: true) }
@@ -429,15 +501,24 @@ struct AvisoEsperando: View {
 struct CampoBusca: View {
   @Binding var texto: String
   let dica: String
+  /// Com uma ação, mostra "⌘P" à direita: o clique abre a paleta de comandos.
+  var paleta: (() -> Void)? = nil
   var body: some View {
-    HStack(spacing: 7) {
-      Image(systemName: "magnifyingglass").font(.system(size: 11.5)).foregroundStyle(Cor.texto3)
-      TextField(dica, text: $texto).textFieldStyle(.plain).font(F.ui(12.5))
+    HStack(spacing: 8) {
+      Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(Cor.texto3)
+      TextField(dica, text: $texto).textFieldStyle(.plain).font(F.ui(13))
       if !texto.isEmpty {
         Button { texto = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)).foregroundStyle(Cor.texto4) }.buttonStyle(.plain)
+      } else if let paleta {
+        Button(action: paleta) {
+          Text("⌘P").font(F.ui(10.5, .semibold)).foregroundStyle(Cor.texto3)
+            .padding(.horizontal, 5).frame(height: 18)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Cor.vidro2))
+        }
+        .buttonStyle(.plain).help("Paleta de comandos  ⌘P")
       }
     }
-    .padding(.horizontal, 10).frame(height: F.m(30))
+    .padding(.horizontal, 10).frame(height: F.m(32))
     .background(RoundedRectangle(cornerRadius: R.controle, style: .continuous).fill(Cor.vidro))
   }
 }
@@ -459,7 +540,7 @@ struct TituloSecao<Acessorio: View>: View {
             .opacity(sobre || r.wrappedValue ? 1 : 0)
             .frame(width: 8)
         }
-        Text(titulo.uppercased()).tracking(0.6)
+        Text(titulo)
         if let total, total > 0 { Text("· \(total)").monospacedDigit() }
       }
       .contentShape(Rectangle())
@@ -468,8 +549,8 @@ struct TituloSecao<Acessorio: View>: View {
       Spacer()
       acessorio
     }
-    .font(F.ui(10, .semibold)).foregroundStyle(sobre ? Cor.texto3 : Cor.texto4)
-    .padding(.leading, recolhido == nil ? 10 : 0).padding(.trailing, 4).frame(height: 24)
+    .font(F.ui(11.5, .medium)).foregroundStyle(sobre ? Cor.texto2 : Cor.texto3)
+    .padding(.leading, recolhido == nil ? 10 : 0).padding(.trailing, 4).frame(height: 26)
     .onHover { sobre = $0 }
   }
 }
@@ -554,7 +635,7 @@ struct LinhaAba: View {
       }
     }
     .padding(.horizontal, 8).padding(.vertical, nivel > 0 ? 5 : 7)
-    .background(RoundedRectangle(cornerRadius: R.controle + 2, style: .continuous).fill(ativa ? Cor.elevado : (sobre ? Cor.vidro : .clear)))
+    .background(RoundedRectangle(cornerRadius: R.controle + 2, style: .continuous).fill(ativa ? Cor.escolhido : (sobre ? Cor.vidro : .clear)))
     .contentShape(Rectangle())
     .onHover { sobre = $0 }
     .onTapGesture { loja.ativar(aba) }

@@ -102,15 +102,17 @@ final class VistaMascoteVivo: NSView {
     corpo.frame = quadro
     corpo.contents = VistaMascoteVivo.imagem(d, partes: .semOlhos, feliz: false, escala: escala)
     corpo.contentsScale = escala
+    corpo.magnificationFilter = .nearest
     olhosFora.frame = quadro
     olhosDentro.frame = olhosFora.bounds
     // O piscar fecha os olhos em volta da linha deles.
-    let yOlho = 1 - (pad + s * VistaMascoteVivo.alturaOlhos(d.forma)) / lado
+    let yOlho = 1 - (pad + s * VistaMascoteVivo.alturaOlhos(d)) / lado
     olhosDentro.anchorPoint = CGPoint(x: 0.5, y: yOlho)
     olhosDentro.position = CGPoint(x: lado / 2, y: yOlho * lado)
     let olhos = VistaMascoteVivo.imagem(d, partes: .soOlhos, feliz: false, escala: escala)
     olhosDentro.contents = olhos
     olhosDentro.contentsScale = escala
+    olhosDentro.magnificationFilter = .nearest
     let base = NSColor(hex: d.cor)
     halo.colors = [base.withAlphaComponent(0.5).cgColor, base.withAlphaComponent(0).cgColor]
     halo.locations = [0.42, 1]
@@ -277,28 +279,13 @@ final class VistaMascoteVivo: NSView {
   // MARK: Imagens
 
   static let margem: CGFloat = 0.45
-  private static let cache = NSCache<NSString, CGImage>()
-
-  static func alturaOlhos(_ forma: String) -> CGFloat {
-    ["gota": 0.6, "fantasma": 0.47, "nuvem": 0.56, "flor": 0.53, "pilula": 0.42][forma] ?? 0.48
-  }
+  /// Linha dos olhos (fração do corpo) — o piscar fecha em volta dela.
+  static func alturaOlhos(_ d: DesenhoMascote) -> CGFloat { MascotePixel.linhaOlhos(d.forma, humor: d.humor) }
 
   /// O desenho (sem os olhos, ou só os olhos) num quadro com margem para acessório e sombra.
   @MainActor static func imagem(_ d: DesenhoMascote, partes: DesenhoMascote.Partes, feliz: Bool, escala: CGFloat) -> CGImage? {
-    let chave = "\(d.forma)|\(d.cor)|\(d.tamanho)|\(d.humor)|\(d.acessorio)|\(partes)|\(feliz)|\(escala)|\(Cor.claro)" as NSString
-    if let c = cache.object(forKey: chave) { return c }
-    let s = d.tamanho
-    let pad = s * margem
-    var pose = PoseMascote()
-    pose.feliz = feliz
-    let conteudo = d.desenho(pose: feliz ? pose : nil, partes: partes)
-      .frame(width: s, height: s)
-      .padding(pad)
-      .frame(width: s + 2 * pad, height: s + 2 * pad)
-    let r = ImageRenderer(content: conteudo)
-    r.scale = escala
-    guard let img = r.cgImage else { return nil }
-    cache.setObject(img, forKey: chave)
-    return img
+    let parte: MascotePixel.Parte = partes == .soOlhos ? .olhos : (partes == .semOlhos ? .corpo : .tudo)
+    return MascotePixel.imagem(forma: d.forma, cor: d.cor, lado: d.tamanho, margem: d.tamanho * margem, humor: d.humor,
+                               acessorio: d.acessorio, feliz: feliz, parte: parte, escala: escala)
   }
 }

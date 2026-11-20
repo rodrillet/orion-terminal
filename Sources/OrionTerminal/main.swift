@@ -127,6 +127,7 @@ final class Delegado: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserN
     aplicarVidro()
     if Armazem.semFoco { janela.orderBack(nil) } else { janela.makeKeyAndOrderFront(nil) }
     posicionarSemaforo()
+    PrintDev.ligar()
   }
 
   /// Ao abrir, a janela não ocupa a tela inteira: um quadro salvo maior que ~92% da tela volta
